@@ -141,7 +141,7 @@ export function UsersView() {
                   <button 
                     onClick={() => handleOpenEdit(user)}
                     className="p-2 text-slate-400 hover:text-primary hover:bg-primary/5 rounded-lg"
-                    title="Edit Profil"
+                    title="Edit Profile"
                   >
                     <Edit2 className="w-4 h-4" />
                   </button>

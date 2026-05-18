@@ -472,14 +472,14 @@ async function startServer() {
       const validPassword = await bcrypt.compare(password, user.password);
       if (!validPassword) return res.status(401).json({ message: "Invalid credentials" });
 
-      const displayName = user.displayName || user.full_name || user.name || "";
+      const displayName = user.displayName || user.full_name || "";
       const token = jwt.sign(
         { 
           id: user.id, 
           email: user.email, 
           role: user.role, 
-          displayName: user.full_name || user.displayName || user.name || user.email, 
-          full_name: user.full_name || user.displayName || user.name || "" 
+          displayName: user.full_name || user.displayName || user.email, 
+          full_name: user.full_name || user.displayName || "" 
         }, 
         JWT_SECRET, 
         { expiresIn: "24h" }
@@ -489,7 +489,7 @@ async function startServer() {
         user: { 
           id: user.id, 
           email: user.email, 
-          displayName: user.full_name || user.displayName || user.name, 
+          displayName: user.full_name || user.displayName, 
           role: user.role 
         } 
       });
@@ -509,9 +509,9 @@ async function startServer() {
       res.json({ 
         id: user.id, 
         email: user.email, 
-        displayName: user.full_name || user.displayName || user.name || user.email, 
+        displayName: user.full_name || user.displayName || user.email, 
         role: user.role,
-        full_name: user.full_name || user.displayName || user.name || ""
+        full_name: user.full_name || user.displayName || ""
       });
     } catch (error) {
       res.status(500).json({ message: "Error fetching user" });
@@ -670,7 +670,7 @@ async function startServer() {
       console.log(`FETCH_CONNECTIONS: UserID=${userId}, Role=${userRole}`);
       
       const conns = await db("connections").select("*");
-      const users = await db("users").select("id", "email", "full_name", "name");
+      const users = await db("users").select("id", "email", "full_name", "displayName");
       
       console.log(`FETCH_CONNECTIONS: Raw Conns Count=${conns.length}, Users Count=${users.length}`);
 
@@ -679,7 +679,7 @@ async function startServer() {
         return {
           ...c,
           userEmail: u?.email || "Unknown",
-          userName: u?.full_name || u?.name || "Unknown",
+          userName: u?.full_name || u?.displayName || "Unknown",
           provider: c.provider
         };
       });
@@ -921,7 +921,7 @@ async function startServer() {
         url,
         pmId: pmId,
         created_by: pmId,
-        created_by_name: req.user.full_name || req.user.displayName || req.user.name || req.user.email
+        created_by_name: req.user.full_name || req.user.displayName || req.user.email
       });
       console.log("CLIENT_CREATED_SUCCESS:", { id, name, creator: req.user.full_name || req.user.displayName });
       res.json({ id, name, emailIdentifiers, url });
