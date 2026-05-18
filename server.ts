@@ -530,13 +530,14 @@ async function startServer() {
       const selectFields = ["id", "email", "role", "created_at", "created_by"];
       if (columns.displayName) selectFields.push("displayName");
       if (columns.full_name) selectFields.push("full_name");
+      if (columns.name) selectFields.push("name");
       if (columns.gmailConnected) selectFields.push("gmailConnected");
       if (columns.manager_id) selectFields.push("manager_id");
       
       const users = await db("users").select(selectFields);
       res.json(users.map(u => ({
         ...u,
-        displayName: u.displayName || u.full_name
+        displayName: u.full_name || u.displayName || u.name || u.email.split("@")[0]
       })));
     } catch (error) {
       res.status(500).json({ message: "Error fetching users" });
@@ -620,7 +621,8 @@ async function startServer() {
       const columns = await db("users").columnInfo();
       if (fullName) {
         if (columns.full_name) updates.full_name = fullName;
-        else if (columns.displayName) updates.displayName = fullName;
+        if (columns.displayName) updates.displayName = fullName;
+        if (columns.name) updates.name = fullName;
       }
 
       await db("users").where({ id }).update(updates);

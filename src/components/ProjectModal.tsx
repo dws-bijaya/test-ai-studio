@@ -68,7 +68,7 @@ export function ProjectModal({ isOpen, onClose, onSuccess, projectToEdit }: Proj
       setClients(clientsList);
       
       const managers = allUsers.filter((u: any) => ["pmm", "admin", "superadmin"].includes(u.role.toLowerCase()));
-      const pmUsers = allUsers.filter((u: any) => u.role.toLowerCase().includes("pm"));
+      const pmUsers = allUsers.filter((u: any) => u.role.toLowerCase() === "pm");
       
       const grouped: any[] = [];
       managers.forEach((m: any) => {
@@ -84,7 +84,6 @@ export function ProjectModal({ isOpen, onClose, onSuccess, projectToEdit }: Proj
       // Add unmanaged PMs
       const unmanaged = pmUsers.filter((pm: any) => !managers.find(m => Number(m.id) === Number(pm.manager_id)));
       if (unmanaged.length > 0) {
-        grouped.push({ isManager: true, displayName: "Other Project Managers", id: "other" });
         unmanaged.forEach((pm: any) => {
           grouped.push({ isManager: false, ...pm });
         });
@@ -192,7 +191,7 @@ export function ProjectModal({ isOpen, onClose, onSuccess, projectToEdit }: Proj
                     onChange={(e) => setFormData({ ...formData, pmId: e.target.value })}
                     className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all font-medium appearance-none bg-white"
                   >
-                    <option value="">--- Select a PM ---</option>
+                    <option value="">Select a PM</option>
                     {pms.map((p) => (
                       <option 
                         key={p.id} 
@@ -200,7 +199,7 @@ export function ProjectModal({ isOpen, onClose, onSuccess, projectToEdit }: Proj
                         disabled={p.isManager}
                         className={p.isManager ? "font-bold text-slate-500 bg-slate-50" : ""}
                       >
-                        {p.isManager ? `----- ${p.displayName || p.userName || p.email}` : `--------- ${p.displayName || p.userName || p.email}`}
+                        {p.isManager ? `${p.displayName || p.userName || p.email}` : `  ${p.displayName || p.userName || p.email}`}
                       </option>
                     ))}
                   </select>

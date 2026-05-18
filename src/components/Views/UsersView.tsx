@@ -23,7 +23,7 @@ export function UsersView() {
   });
 
   const roles: UserRole[] = ["SuperAdmin", "Admin", "PMM", "PM"];
-  const managers = users.filter(u => u.role === "PMM" || u.role === "PM");
+  const managers = users.filter(u => u.role === "PMM");
 
   const fetchUsers = async () => {
     setLoading(true);
