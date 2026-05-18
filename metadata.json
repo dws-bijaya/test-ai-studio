@@ -1,0 +1,6 @@
+{
+  "name": "PM Monitor Tools",
+  "description": "A centralized platform for tracking project-specific email communications using Gmail API, featuring automated syncing, weekly reporting, and PDF exporting.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

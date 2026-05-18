@@ -1,0 +1,74 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "System users with roles.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["super_admin", "admin", "pm"] },
+        "gmailConnected": { "type": "boolean" }
+      },
+      "required": ["email", "role"]
+    },
+    "Client": {
+      "title": "Client",
+      "description": "Clients to be tracked.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "emailIdentifiers": { "type": "array", "items": { "type": "string" } },
+        "pmId": { "type": "string" }
+      },
+      "required": ["name", "emailIdentifiers", "pmId"]
+    },
+    "Project": {
+      "title": "Project",
+      "description": "Projects linked to clients.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "startDate": { "type": "string", "format": "date" },
+        "status": { "type": "string", "enum": ["Active", "Completed", "On Hold"] },
+        "clientId": { "type": "string" },
+        "pmId": { "type": "string" }
+      },
+      "required": ["name", "startDate", "status", "clientId", "pmId"]
+    },
+    "EmailLog": {
+      "title": "EmailLog",
+      "description": "Stored email messages.",
+      "type": "object",
+      "properties": {
+        "messageId": { "type": "string" },
+        "threadId": { "type": "string" },
+        "projectId": { "type": "string" },
+        "sender": { "type": "string" },
+        "receiver": { "type": "string" },
+        "subject": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "body": { "type": "string" }
+      },
+      "required": ["messageId", "threadId", "projectId", "sender", "receiver", "subject", "timestamp", "body"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles and roles."
+    },
+    "/clients/{clientId}": {
+      "schema": "Client",
+      "description": "Client registry."
+    },
+    "/projects/{projectId}": {
+      "schema": "Project",
+      "description": "Project management."
+    },
+    "/emailLogs/{logId}": {
+      "schema": "EmailLog",
+      "description": "Captured email data."
+    }
+  }
+}
