@@ -10,7 +10,8 @@ import {
   X,
   Mail,
   Link,
-  Calendar
+  Calendar,
+  Layers
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { ClientsView } from "./Views/ClientsView";
@@ -21,8 +22,9 @@ import { ConnectionsView } from "./Views/ConnectionsView";
 import { InboxView } from "./Views/InboxView";
 import { CronLogsView } from "./Views/CronLogsView";
 import { PMInboxWeeklyView } from "./Views/PMInboxWeeklyView";
+import { BusinessUnitsView } from "./Views/BusinessUnitsView";
 
-type View = "dashboard" | "clients" | "projects" | "users" | "connections" | "inbox" | "cronlogs" | "pm_weekly";
+type View = "dashboard" | "clients" | "projects" | "users" | "connections" | "inbox" | "cronlogs" | "pm_weekly" | "business_units";
 
 export function Dashboard() {
   const { user, logout } = useAuth();
@@ -36,6 +38,7 @@ export function Dashboard() {
     { id: "pm_weekly", label: "PM Inbox (Weekly)", icon: Calendar, roles: ["Admin", "PMM", "SuperAdmin"] },
     { id: "clients", label: "Clients", icon: Users, roles: ["PM", "Admin", "PMM", "SuperAdmin"] },
     { id: "users", label: "Users", icon: Users, roles: ["SuperAdmin", "Admin", "PMM"] },
+    { id: "business_units", label: "Business Units", icon: Layers, roles: ["SuperAdmin", "Admin"] },
     { id: "connections", label: "Connections", icon: Link, roles: ["PM", "Admin", "PMM", "SuperAdmin"] },
     { id: "cronlogs", label: "Cron Logs", icon: Settings, roles: ["SuperAdmin", "Admin"] },
   ];
@@ -55,6 +58,7 @@ export function Dashboard() {
       case "projects": return <ProjectsView />;
       case "cronlogs": return <CronLogsView />;
       case "pm_weekly": return <PMInboxWeeklyView />;
+      case "business_units": return <BusinessUnitsView />;
       default: return <DashboardView />;
     }
   };

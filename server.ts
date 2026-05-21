@@ -64,9 +64,10 @@ async function startServer() {
     const allUsers = await db("users").select("id", "email", "role");
     console.log("Current users in DB:", JSON.stringify(allUsers, null, 2));
 
-    // Ensure all PMs have connection records
+    // Ensure all PMs and PMMs have connection records
     for (const u of allUsers) {
-      if ((u.role || "").toUpperCase() === "PM") {
+      const roleUpper = (u.role || "").toUpperCase();
+      if (roleUpper === "PM" || roleUpper === "PMM") {
         const conn = await db("connections").where({ user_id: u.id }).first();
         if (!conn) {
           await db("connections").insert({
@@ -74,7 +75,7 @@ async function startServer() {
             provider: null,
             status: "pending"
           });
-          console.log(`Auto-created missing connection record for PM: ${u.email}`);
+          console.log(`Auto-created missing connection record for ${roleUpper}: ${u.email}`);
         }
       }
     }
@@ -239,21 +240,37 @@ async function startServer() {
 
       for (const conn of activeConnections) {
         try {
-          const pmId = conn.user_id;
-          // Find all projects for this PM
-          const pmProjects = await db("projects")
-            .where({ pmId })
-            .orWhere({ pm_id: pmId })
-            .whereNot("status", "closed");
+          const userId = conn.user_id;
+          const userRec = await db("users").where({ id: userId }).first();
+          if (!userRec) continue;
+          
+          const roleUpper = (userRec.role || "").toUpperCase();
+          const sourceRole = roleUpper === "PMM" ? "PMM" : "PM";
 
-          if (pmProjects.length === 0) continue;
+          // Find projects associated with this user
+          // If the user is a PM, find projects where they are pmId
+          // If the user is a PMM, find projects where they are pmm_id
+          let associatedProjects = [];
+          if (sourceRole === "PM") {
+            associatedProjects = await db("projects")
+              .where(function() {
+                this.where("pmId", userId).orWhere("pm_id", userId);
+              })
+              .whereNot("status", "closed");
+          } else {
+            associatedProjects = await db("projects")
+              .where("pmm_id", userId)
+              .whereNot("status", "closed");
+          }
+
+          if (associatedProjects.length === 0) continue;
 
           if (conn.provider === "gmail") {
             const client = new google.auth.OAuth2(G_CLIENT_ID, G_CLIENT_SECRET, G_REDIRECT_URI);
             client.setCredentials({ refresh_token: conn.refresh_token });
             const gmail = google.gmail({ version: "v1", auth: client });
 
-            for (const project of pmProjects) {
+            for (const project of associatedProjects) {
               const projectStartDate = project.startDate || project.start_date;
               if (!projectStartDate) continue;
 
@@ -281,13 +298,14 @@ async function startServer() {
                   const response = await gmail.users.messages.list({ userId: "me", q: query.q });
                   let newGmailCount = 0;
                   for (const msg of response.data.messages || []) {
-                    const existing = await db("inbox").where({ message_id: msg.id }).first();
-                    if (existing) {
-                      if (!existing.project_id) {
-                        await db("inbox").where({ id: existing.id }).update({ project_id: project.id });
-                      }
-                      continue;
-                    }
+                    // Check if this specific email is already recorded for this project AND source role
+                    const existing = await db("inbox").where({ 
+                      message_id: msg.id, 
+                      project_id: project.id,
+                      source_role: sourceRole 
+                    }).first();
+                    
+                    if (existing) continue;
 
                     const fullMsg = await gmail.users.messages.get({ userId: "me", id: msg.id! });
                     const payload = fullMsg.data.payload;
@@ -338,16 +356,19 @@ async function startServer() {
                     };
                     if (payload?.parts) collectAttachments(payload.parts);
 
+                    // We store it against the PM ID of the project regardless of who synced it, 
+                    // but labeled with source_role
                     await db("inbox").insert({
                       message_id: msg.id,
                       email_date: emailDate,
                       subject,
-                      pm_id: pmId,
+                      pm_id: project.pmId || project.pm_id,
                       client_id: project.clientId,
                       project_id: project.id,
                       from_address: senders.join(", "),
                       to_address: receivers.join(", "),
                       type: query.type,
+                      source_role: sourceRole,
                       body: cleanedBody,
                       has_attachments: hasAttachments,
                       attachments_json: JSON.stringify(attachments)
@@ -355,13 +376,13 @@ async function startServer() {
                     newGmailCount++;
                   }
                   if (newGmailCount > 0) {
-                    await logCron(`Stored ${newGmailCount} new Gmail ${query.type} messages for client "${clientRec.name}"`, "success");
+                    await logCron(`Stored ${newGmailCount} new Gmail ${query.type} messages for client "${clientRec.name}" (Source: ${sourceRole})`, "success");
                   }
                 }
               }
             }
           } else if (conn.provider === "outlook") {
-            for (const project of pmProjects) {
+            for (const project of associatedProjects) {
               const projectStartDate = project.startDate || project.start_date;
               if (!projectStartDate) continue;
 
@@ -383,8 +404,17 @@ async function startServer() {
                   grant_type: "refresh_token",
                 }).toString(),
                 { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
-              ).catch(e => {
-                logCron(`Outlook token refresh failed for connection id=${conn.id}`, "error");
+              ).catch(async (e) => {
+                const responseData = e.response?.data;
+                const errStr = responseData ? JSON.stringify(responseData).toLowerCase() : "";
+                const isAuthError = errStr.includes("invalid_grant") || errStr.includes("expired") || errStr.includes("revoked") || (e.message || "").toLowerCase().includes("invalid_grant");
+                
+                await logCron(`Outlook token refresh failed for connection id=${conn.id}: ${e.message || "Unknown error"} ${errStr}`, "error");
+                
+                if (isAuthError) {
+                  await db("connections").where({ id: conn.id }).update({ status: "expired" });
+                  await logCron(`Connection ${conn.id} status updated to 'expired' due to Outlook invalid_grant.`, "error");
+                }
                 return null;
               });
 
@@ -413,13 +443,13 @@ async function startServer() {
 
                   let newOutlookCount = 0;
                   for (const msg of outlookRes.data.value || []) {
-                    const existing = await db("inbox").where({ message_id: msg.id }).first();
-                    if (existing) {
-                      if (!existing.project_id) {
-                        await db("inbox").where({ id: existing.id }).update({ project_id: project.id });
-                      }
-                      continue;
-                    }
+                    const existing = await db("inbox").where({ 
+                      message_id: msg.id, 
+                      project_id: project.id,
+                      source_role: sourceRole 
+                    }).first();
+                    
+                    if (existing) continue;
 
                     const body = msg.body?.contentType === "html" ? convert(msg.body.content) : msg.body?.content;
                     const cleanedBody = cleanEmailBody(body || "");
@@ -428,12 +458,13 @@ async function startServer() {
                       message_id: msg.id,
                       email_date: new Date(msg.receivedDateTime),
                       subject: msg.subject,
-                      pm_id: pmId,
+                      pm_id: project.pmId || project.pm_id,
                       client_id: project.clientId,
                       project_id: project.id,
                       from_address: msg.from?.emailAddress?.address,
                       to_address: msg.toRecipients?.map((r: any) => r.emailAddress?.address).join(", "),
                       type: query.type,
+                      source_role: sourceRole,
                       body: cleanedBody,
                       has_attachments: msg.hasAttachments || false,
                       attachments_json: JSON.stringify([])
@@ -441,7 +472,7 @@ async function startServer() {
                     newOutlookCount++;
                   }
                   if (newOutlookCount > 0) {
-                    await logCron(`Stored ${newOutlookCount} new Outlook ${query.type} messages for client "${clientRec.name}"`, "success");
+                    await logCron(`Stored ${newOutlookCount} new Outlook ${query.type} messages for client "${clientRec.name}" (Source: ${sourceRole})`, "success");
                   }
                 }
               }
@@ -449,6 +480,25 @@ async function startServer() {
           }
         } catch (connErr: any) {
           await logCron(`Error scanning connection ${conn.id}: ${connErr.message}`, "error");
+          
+          const errMsg = (connErr.message || "").toLowerCase();
+          const responseData = connErr.response?.data;
+          const errStr = responseData ? JSON.stringify(responseData).toLowerCase() : "";
+          
+          const isAuthError = errMsg.includes("invalid_grant") || 
+                              errMsg.includes("invalid refresh_token") || 
+                              errMsg.includes("token has been expired") || 
+                              errMsg.includes("revoked") ||
+                              errMsg.includes("unauthorized") ||
+                              errMsg.includes("invalid credentials") ||
+                              errStr.includes("invalid_grant") ||
+                              errStr.includes("expired") ||
+                              errStr.includes("revoked");
+                              
+          if (isAuthError) {
+            await db("connections").where({ id: conn.id }).update({ status: "expired" });
+            await logCron(`Connection ${conn.id} status updated to 'expired' due to authorization revocation, invalid grant, or expiration.`, "error");
+          }
         }
       }
       await logCron("Email scan sequence completed.", "success");
@@ -581,8 +631,9 @@ async function startServer() {
         userId = id;
         console.log(`User created with ID: ${userId}, Role: ${role}`);
         
-        if (role && (role.toUpperCase() === "PM" || role.toLowerCase() === "pm")) {
-          console.log(`Creating connection record for user ${userId}`);
+        const roleUpper = (role || "").toUpperCase();
+        if (role && (roleUpper === "PM" || roleUpper === "PMM" || role.toLowerCase() === "pm" || role.toLowerCase() === "pmm")) {
+          console.log(`Creating connection record for user ${userId} with role ${role}`);
           await trx("connections").insert({
             user_id: userId,
             provider: null,
@@ -627,10 +678,10 @@ async function startServer() {
 
       await db("users").where({ id }).update(updates);
 
-      // If role became PM, ensure connection record exists
+      // If role became PM or PMM, ensure connection record exists
       const finalUser = await db("users").where({ id }).first();
       const finalRole = (finalUser.role || "").toUpperCase();
-      if (finalRole === "PM" || finalRole === "PROJECTMANAGER") {
+      if (finalRole === "PM" || finalRole === "PMM" || finalRole === "PROJECTMANAGER") {
         const existingConn = await db("connections").where({ user_id: id }).first();
         if (!existingConn) {
           await db("connections").insert({
@@ -672,7 +723,7 @@ async function startServer() {
       console.log(`FETCH_CONNECTIONS: UserID=${userId}, Role=${userRole}`);
       
       const conns = await db("connections").select("*");
-      const users = await db("users").select("id", "email", "full_name", "displayName");
+      const users = await db("users").select("id", "email", "full_name", "displayName", "role");
       
       console.log(`FETCH_CONNECTIONS: Raw Conns Count=${conns.length}, Users Count=${users.length}`);
 
@@ -682,6 +733,7 @@ async function startServer() {
           ...c,
           userEmail: u?.email || "Unknown",
           userName: u?.full_name || u?.displayName || "Unknown",
+          userRole: u?.role || "Unknown",
           provider: c.provider
         };
       });
@@ -1008,13 +1060,14 @@ async function startServer() {
     try {
       const userRole = (req.user.role || "").toLowerCase().replace(/_/g, "");
       const query = db("projects")
-        .select("projects.*", "clients.name as clientName", "users.displayName as pmName")
+        .select("projects.*", "clients.name as clientName", "users.displayName as pmName", "business_units.name as businessUnitName")
         .leftJoin("clients", function() {
           this.on("projects.clientId", "=", "clients.id").orOn("projects.client_id", "=", "clients.id")
         })
         .leftJoin("users", function() {
           this.on("projects.pmId", "=", "users.id").orOn("projects.pm_id", "=", "users.id")
-        });
+        })
+        .leftJoin("business_units", "projects.business_unit_id", "business_units.id");
 
       if (userRole === "pm") {
         query.where(function() {
@@ -1037,7 +1090,7 @@ async function startServer() {
       return res.status(403).json({ message: "Access denied. Only PMM, Admin, or SuperAdmin can create projects." });
     }
 
-    const { name, startDate, clientId, pmId, status } = req.body;
+    const { name, startDate, clientId, pmId, status, business_unit_id, businessUnitId } = req.body;
     
     if (!name || !clientId || !pmId || !startDate) {
       return res.status(400).json({ message: "Project Name, Client, PM, and Start Date are required." });
@@ -1056,11 +1109,16 @@ async function startServer() {
 
       const createdBy = Number(req.user.id);
       const targetPmId = Number(pmId);
+      const targetBusinessUnitId = business_unit_id || businessUnitId ? Number(business_unit_id || businessUnitId) : null;
 
       if (isNaN(createdBy) || isNaN(targetPmId)) {
         console.error("CREATE_PROJECT_ERROR: Numeric conversion failed", { createdBy: req.user.id, pmId });
         return res.status(400).json({ message: "Invalid User or PM ID" });
       }
+
+      // Fetch PM to get their manager for PMM association
+      const pmUser = await db("users").where({ id: targetPmId }).first();
+      const pmmId = pmUser?.manager_id || null;
 
       const [id] = await db("projects").insert({
         name,
@@ -1070,11 +1128,13 @@ async function startServer() {
         client_id: Number(clientId),
         pmId: targetPmId,
         pm_id: targetPmId,
+        pmm_id: pmmId,
+        business_unit_id: targetBusinessUnitId,
         status: status || "active",
         created_by: createdBy
       });
-      console.log("PROJECT_CREATED_SUCCESS:", { id, name });
-      res.json({ id, name, startDate, clientId: Number(clientId), pmId: targetPmId, status: status || "active" });
+      console.log("PROJECT_CREATED_SUCCESS:", { id, name, pmmId, targetBusinessUnitId });
+      res.json({ id, name, startDate, clientId: Number(clientId), pmId: targetPmId, pmmId, business_unit_id: targetBusinessUnitId, status: status || "active" });
     } catch (error: any) {
       console.error("Create project error:", error);
       res.status(500).json({ 
@@ -1093,7 +1153,7 @@ async function startServer() {
       return res.status(403).json({ message: "Access denied." });
     }
 
-    const { name, startDate, clientId, pmId, status } = req.body;
+    const { name, startDate, clientId, pmId, status, business_unit_id, businessUnitId } = req.body;
     try {
       const updateData: any = {
         name,
@@ -1115,6 +1175,10 @@ async function startServer() {
       }
       if (status) {
         updateData.status = status;
+      }
+      if (business_unit_id !== undefined || businessUnitId !== undefined) {
+        const buVal = business_unit_id !== undefined ? business_unit_id : businessUnitId;
+        updateData.business_unit_id = buVal ? Number(buVal) : null;
       }
 
       await db("projects").where({ id }).update(updateData);
@@ -1140,6 +1204,40 @@ async function startServer() {
       res.json({ message: "All projects cleared" });
     } catch (error) {
       res.status(500).send("Error clearing projects");
+    }
+  });
+
+  // Get all business units
+  app.get("/api/business-units", authenticateToken, async (req: any, res) => {
+    try {
+      const units = await db("business_units").orderBy("id", "asc");
+      res.json(units);
+    } catch (error) {
+      console.error("Fetch business units error:", error);
+      res.status(500).json({ message: "Error fetching business units" });
+    }
+  });
+
+  // Update business unit name
+  app.put("/api/business-units/:id", authenticateToken, async (req: any, res) => {
+    const userRole = (req.user.role || "").toLowerCase().replace(/_/g, "");
+    if (userRole !== "superadmin" && userRole !== "admin") {
+      return res.status(403).json({ message: "Only Admin or SuperAdmin can edit Business Units." });
+    }
+
+    const { id } = req.params;
+    const { name } = req.body;
+
+    if (!name || name.trim() === "") {
+      return res.status(400).json({ message: "Business Unit name is required." });
+    }
+
+    try {
+      await db("business_units").where({ id }).update({ name: name.trim(), updated_at: db.fn.now() });
+      res.json({ message: "Business Unit updated successfully." });
+    } catch (error) {
+      console.error("Update business unit error:", error);
+      res.status(500).json({ message: "Error updating Business Unit." });
     }
   });
 

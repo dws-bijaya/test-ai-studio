@@ -110,7 +110,14 @@ export function ProjectsView() {
                           <Briefcase className="w-5 h-5" />
                         </div>
                         <div>
-                          <div className="font-bold text-slate-900 group-hover:text-primary transition-colors">{project.name}</div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <div className="font-bold text-slate-900 group-hover:text-primary transition-colors">{project.name}</div>
+                            {project.businessUnitName && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-blue-50 text-blue-600 border border-blue-150 uppercase tracking-wider">
+                                {project.businessUnitName}
+                              </span>
+                            )}
+                          </div>
                           <div className="text-xs text-slate-400 font-medium">#{project.id}</div>
                         </div>
                       </div>

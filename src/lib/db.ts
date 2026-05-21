@@ -113,6 +113,42 @@ export async function initSchema() {
       */
     }
 
+    const hasBusinessUnits = await db.schema.hasTable("business_units");
+    if (!hasBusinessUnits) {
+      await db.schema.createTable("business_units", (table) => {
+        table.increments("id").primary();
+        table.string("name", 255).notNullable();
+        table.timestamps(true, true);
+      });
+      console.log("Business units table created");
+    }
+
+    // Force/Reset Business Units to the requested set
+    try {
+      const targetBUs = [
+        { id: 1, name: "DWS Signature" },
+        { id: 2, name: "Wytlabs" },
+        { id: 3, name: "CollabX" },
+        { id: 4, name: "Smegoweb IND" },
+        { id: 5, name: "Smegoweb NZ" }
+      ];
+
+      for (const bu of targetBUs) {
+        const existing = await db("business_units").where({ id: bu.id }).first();
+        if (existing) {
+          await db("business_units").where({ id: bu.id }).update({ name: bu.name });
+        } else {
+          await db("business_units").insert(bu);
+        }
+      }
+      
+      // Safety check: remove any other entries
+      await db("business_units").whereNotIn("id", targetBUs.map(b => b.id)).delete();
+      console.log("Business units reset and synchronized successfully");
+    } catch (buErr) {
+      console.error("Error synchronizing business units:", buErr);
+    }
+
     const hasProjects = await db.schema.hasTable("projects");
     if (!hasProjects) {
       await db.schema.createTable("projects", (table) => {
@@ -124,6 +160,7 @@ export async function initSchema() {
         table.integer("client_id").unsigned().references("id").inTable("clients");
         table.integer("pmId").unsigned().references("id").inTable("users");
         table.integer("pm_id").unsigned().references("id").inTable("users");
+        table.integer("business_unit_id").unsigned().references("id").inTable("business_units");
         table.string("status", 50).defaultTo("active");
         table.integer("created_by").unsigned();
         table.timestamps(true, true);
@@ -157,6 +194,14 @@ export async function initSchema() {
         }
         if (!columns.client_id) {
           table.integer("client_id").unsigned();
+        }
+
+        if (!columns.pmm_id) {
+          table.integer("pmm_id").unsigned();
+        }
+
+        if (!columns.business_unit_id) {
+          table.integer("business_unit_id").unsigned();
         }
 
         if (!columns.created_at) {
@@ -228,6 +273,8 @@ export async function initSchema() {
         if (!columns.updated_at) {
           table.timestamp("updated_at").defaultTo(db.fn.now());
         }
+        // Force status column to string(50) to support larger statuses like 'expired'
+        table.string("status", 50).defaultTo("pending").alter();
       });
     }
 
@@ -241,8 +288,9 @@ export async function initSchema() {
         table.integer("client_id").unsigned();
         table.integer("project_id").unsigned();
         table.string("from_address", 255);
+        table.string("source_role", 20); // PM or PMM
         table.text("body", "longtext");
-        table.string("message_id", 255).unique();
+        table.string("message_id", 255);
         table.boolean("has_attachments").defaultTo(false);
         table.text("attachments_json"); // Store metadata lists if needed
         table.timestamps(true, true);
@@ -256,7 +304,19 @@ export async function initSchema() {
         if (!columns.project_id) table.integer("project_id").unsigned();
         if (!columns.type) table.string("type", 50).defaultTo("INBOX");
         if (!columns.to_address) table.string("to_address", 255);
+        if (!columns.source_role) table.string("source_role", 20);
       });
+
+      // Drop unique constraint on message_id if it exists to allow PM/PMM overlaps
+      try {
+        await db.schema.alterTable("inbox", (table) => {
+          table.dropUnique(["message_id"]);
+        });
+        console.log("Dropped unique constraint on message_id in inbox table");
+      } catch (e) {
+        // Index might not exist or already dropped
+      }
+
       if (typeJustAdded) {
         await db("inbox").whereNull("type").update({ type: "INBOX" });
       }

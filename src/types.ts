@@ -29,6 +29,15 @@ export interface Project {
   status: "Active" | "Completed" | "On Hold";
   clientId: string;
   pmId: string;
+  business_unit_id?: number;
+  businessUnitName?: string;
+}
+
+export interface BusinessUnit {
+  id: number;
+  name: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface EmailLog {

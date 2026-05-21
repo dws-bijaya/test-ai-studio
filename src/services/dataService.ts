@@ -234,5 +234,29 @@ export const dataService = {
     const res = await fetch("/api/cron-logs", { method: "DELETE" });
     if (!res.ok) throw new Error("Failed to clear logs");
     return await res.json();
+  },
+
+  // Business Units
+  async getBusinessUnits() {
+    try {
+      const res = await fetch("/api/business-units");
+      if (!res.ok) return [];
+      return await res.json();
+    } catch (e) {
+      return [];
+    }
+  },
+
+  async updateBusinessUnit(id: string | number, name: string) {
+    const res = await fetch(`/api/business-units/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ message: "Unknown error" }));
+      throw new Error(error.message || "Failed to update business unit");
+    }
+    return await res.json();
   }
 };

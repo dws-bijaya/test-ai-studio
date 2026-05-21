@@ -9,10 +9,11 @@ interface Connection {
   user_id: number;
   provider: "gmail" | "outlook" | null;
   email: string | null;
-  status: "active" | "invalid" | "pending";
+  status: "active" | "invalid" | "pending" | "expired";
   created_at: string;
   userEmail: string;
   userName: string;
+  userRole: string;
 }
 
 export function ConnectionsView() {
@@ -114,13 +115,17 @@ export function ConnectionsView() {
                   </div>
                   <div>
                     <h3 className="font-bold text-slate-900 capitalize">{conn.provider || "Unlinked"} Connection</h3>
-                    <p className="text-sm text-slate-500">User: {conn.userName || conn.userEmail}</p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <p className="text-sm text-slate-500">User: {conn.userName || conn.userEmail}</p>
+                      <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-mono font-bold uppercase">Role: {conn.userRole || 'PM'}</span>
+                    </div>
                   </div>
                 </div>
                 <div className={cn(
                   "flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold uppercase",
                   conn.status === 'active' ? "bg-green-50 text-green-600" : 
-                  conn.status === 'pending' ? "bg-slate-50 text-slate-500" : "bg-red-50 text-red-600"
+                  conn.status === 'pending' ? "bg-slate-50 text-slate-500" : 
+                  conn.status === 'expired' ? "bg-amber-50 text-amber-600 border border-amber-100" : "bg-red-50 text-red-600"
                 )}>
                   {conn.status === 'active' ? <ShieldCheck className="w-3.5 h-3.5" /> : <ShieldAlert className="w-3.5 h-3.5" />}
                   {conn.status}

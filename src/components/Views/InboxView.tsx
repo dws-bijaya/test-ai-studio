@@ -15,6 +15,7 @@ interface InboxEmail {
   from_address: string;
   to_address?: string;
   type?: "INBOX" | "SENT";
+  source_role?: "PM" | "PMM";
   body: string;
   message_id: string;
   has_attachments: boolean;
@@ -262,7 +263,15 @@ export function InboxView() {
                         )}>
                           {email.type || "INBOX"}
                         </div>
-                        <span className="font-bold text-slate-900 truncate max-w-[180px]">
+                        {email.source_role && (
+                          <div className={cn(
+                            "px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider",
+                            email.source_role === "PMM" ? "bg-purple-100 text-purple-600" : "bg-amber-100 text-amber-600"
+                          )}>
+                            Source: {email.source_role}
+                          </div>
+                        )}
+                        <span className="font-bold text-slate-900 truncate max-w-[150px]">
                           {email.type === "SENT" ? `To: ${email.to_address}` : email.from_address}
                         </span>
                         {email.has_attachments && (
@@ -325,15 +334,25 @@ export function InboxView() {
                     )}
                   </div>
                   <div>
-                    <div className="flex items-center gap-2 mb-0.5">
-                       <h3 className="font-bold text-slate-900 leading-tight truncate max-w-[250px]">{selectedEmail.subject}</h3>
-                       <span className={cn(
-                        "px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider",
-                        selectedEmail.type === "SENT" ? "bg-blue-100 text-blue-600" : "bg-emerald-100 text-emerald-600"
-                      )}>
-                        {selectedEmail.type || "INBOX"}
-                      </span>
-                    </div>
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <h3 className="font-bold text-slate-900 leading-tight truncate max-w-[200px]">{selectedEmail.subject}</h3>
+                        <div className="flex gap-1">
+                          <span className={cn(
+                            "px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider",
+                            selectedEmail.type === "SENT" ? "bg-blue-100 text-blue-600" : "bg-emerald-100 text-emerald-600"
+                          )}>
+                            {selectedEmail.type || "INBOX"}
+                          </span>
+                          {selectedEmail.source_role && (
+                            <span className={cn(
+                              "px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider",
+                              selectedEmail.source_role === "PMM" ? "bg-purple-100 text-purple-600" : "bg-amber-100 text-amber-600"
+                            )}>
+                              {selectedEmail.source_role}
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     <p className="text-xs text-slate-500">
                       {selectedEmail.type === "SENT" ? `To: ${selectedEmail.to_address}` : `From: ${selectedEmail.from_address}`}
                     </p>
