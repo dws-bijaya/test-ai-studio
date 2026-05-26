@@ -11,7 +11,8 @@ import {
   Mail,
   Link,
   Calendar,
-  Layers
+  Layers,
+  Video
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { ClientsView } from "./Views/ClientsView";
@@ -23,8 +24,9 @@ import { InboxView } from "./Views/InboxView";
 import { CronLogsView } from "./Views/CronLogsView";
 import { PMInboxWeeklyView } from "./Views/PMInboxWeeklyView";
 import { BusinessUnitsView } from "./Views/BusinessUnitsView";
+import { FathomMeetingsView } from "./Views/FathomMeetingsView";
 
-type View = "dashboard" | "clients" | "projects" | "users" | "connections" | "inbox" | "cronlogs" | "pm_weekly" | "business_units";
+type View = "dashboard" | "clients" | "projects" | "users" | "connections" | "inbox" | "cronlogs" | "pm_weekly" | "business_units" | "fathom";
 
 export function Dashboard() {
   const { user, logout } = useAuth();
@@ -32,15 +34,16 @@ export function Dashboard() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
   const menuItems = [
-    { id: "dashboard", label: "Dashboard", icon: BarChart3, roles: ["PM", "Admin", "PMM", "SuperAdmin"] },
-    { id: "inbox", label: "Inbox", icon: Mail, roles: ["PM", "Admin", "PMM", "SuperAdmin"] },
-    { id: "projects", label: "Projects", icon: Briefcase, roles: ["PM", "Admin", "PMM", "SuperAdmin"] },
-    { id: "pm_weekly", label: "PM Inbox (Weekly)", icon: Calendar, roles: ["Admin", "PMM", "SuperAdmin"] },
-    { id: "clients", label: "Clients", icon: Users, roles: ["PM", "Admin", "PMM", "SuperAdmin"] },
-    { id: "users", label: "Users", icon: Users, roles: ["SuperAdmin", "Admin", "PMM"] },
-    { id: "business_units", label: "Business Units", icon: Layers, roles: ["SuperAdmin", "Admin"] },
-    { id: "connections", label: "Connections", icon: Link, roles: ["PM", "Admin", "PMM", "SuperAdmin"] },
-    { id: "cronlogs", label: "Cron Logs", icon: Settings, roles: ["SuperAdmin", "Admin"] },
+    { id: "dashboard", label: "Dashboard", icon: BarChart3, roles: ["PM", "Admin", "PMM", "SuperAdmin", "Quality"] },
+    { id: "inbox", label: "Inbox", icon: Mail, roles: ["PM", "Admin", "PMM", "SuperAdmin", "Quality"] },
+    { id: "projects", label: "Projects", icon: Briefcase, roles: ["PM", "Admin", "PMM", "SuperAdmin", "Quality"] },
+    { id: "fathom", label: "Fathom Meetings", icon: Video, roles: ["PM", "Admin", "PMM", "SuperAdmin", "Quality"] },
+    { id: "pm_weekly", label: "PM Inbox (Weekly)", icon: Calendar, roles: ["Admin", "PMM", "SuperAdmin", "Quality"] },
+    { id: "clients", label: "Clients", icon: Users, roles: ["PM", "Admin", "PMM", "SuperAdmin", "Quality"] },
+    { id: "users", label: "Users", icon: Users, roles: ["SuperAdmin", "Admin", "PMM", "Quality"] },
+    { id: "business_units", label: "Business Units", icon: Layers, roles: ["SuperAdmin", "Admin", "Quality"] },
+    { id: "connections", label: "Connections", icon: Link, roles: ["PM", "Admin", "PMM", "SuperAdmin", "Quality"] },
+    { id: "cronlogs", label: "Cron Logs", icon: Settings, roles: ["SuperAdmin", "Admin", "Quality"] },
   ];
 
   const filteredMenu = menuItems.filter(item => {
@@ -59,6 +62,7 @@ export function Dashboard() {
       case "cronlogs": return <CronLogsView />;
       case "pm_weekly": return <PMInboxWeeklyView />;
       case "business_units": return <BusinessUnitsView />;
+      case "fathom": return <FathomMeetingsView />;
       default: return <DashboardView />;
     }
   };

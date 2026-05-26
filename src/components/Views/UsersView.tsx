@@ -22,7 +22,7 @@ export function UsersView() {
     managerId: ""
   });
 
-  const roles: UserRole[] = ["SuperAdmin", "Admin", "PMM", "PM"];
+  const roles: UserRole[] = ["SuperAdmin", "Admin", "PMM", "PM", "Quality"];
   const managers = users.filter(u => u.role === "PMM");
 
   const fetchUsers = async () => {
@@ -89,7 +89,7 @@ export function UsersView() {
     (user.displayName || user.full_name || "").toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const canCreate = ["SuperAdmin", "Admin", "PMM"].includes(currentUser?.role || "");
+  const canCreate = ["SuperAdmin", "Admin", "PMM"].includes(currentUser?.role || "") && currentUser?.role !== "Quality";
   const isSuperAdmin = currentUser?.role === "SuperAdmin";
 
   return (
@@ -138,14 +138,16 @@ export function UsersView() {
                   <User className="text-slate-600 w-6 h-6" />
                 </div>
                 <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button 
-                    onClick={() => handleOpenEdit(user)}
-                    className="p-2 text-slate-400 hover:text-primary hover:bg-primary/5 rounded-lg"
-                    title="Edit Profile"
-                  >
-                    <Edit2 className="w-4 h-4" />
-                  </button>
-                  {isSuperAdmin && String(user.id) !== String(currentUser?.id) && (
+                  {canCreate && (
+                    <button 
+                      onClick={() => handleOpenEdit(user)}
+                      className="p-2 text-slate-400 hover:text-primary hover:bg-primary/5 rounded-lg"
+                      title="Edit Profile"
+                    >
+                      <Edit2 className="w-4 h-4" />
+                    </button>
+                  )}
+                  {isSuperAdmin && currentUser?.role !== "Quality" && String(user.id) !== String(currentUser?.id) && (
                     <button 
                       onClick={() => handleDelete(user.id)}
                       className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
@@ -180,6 +182,8 @@ export function UsersView() {
                     ? "bg-amber-50 text-amber-600 border border-amber-100"
                     : user.role === "PMM"
                     ? "bg-purple-50 text-purple-600 border border-purple-100"
+                    : user.role === "Quality"
+                    ? "bg-emerald-50 text-emerald-600 border border-emerald-100"
                     : "bg-blue-50 text-blue-600 border border-blue-100"
                 )}>
                   <Shield className="w-3 h-3" />

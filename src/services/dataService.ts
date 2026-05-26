@@ -258,5 +258,48 @@ export const dataService = {
       throw new Error(error.message || "Failed to update business unit");
     }
     return await res.json();
+  },
+
+  // Fathom Meetings
+  async getFathomMeetings() {
+    try {
+      const res = await fetch("/api/fathom/meetings");
+      if (!res.ok) return [];
+      return await res.json();
+    } catch (e) {
+      return [];
+    }
+  },
+  async syncFathomMeetings() {
+    const res = await fetch("/api/fathom/sync", { method: "POST" });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ message: "Unknown error" }));
+      throw new Error(error.message || "Failed to trigger Fathom sync");
+    }
+    return await res.json();
+  },
+  async linkFathomMeeting(id: string | number, projectId: string | number | null) {
+    const res = await fetch(`/api/fathom/meetings/${id}/link`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ project_id: projectId }),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ message: "Unknown error" }));
+      throw new Error(error.message || "Failed to link meeting");
+    }
+    return await res.json();
+  },
+  async updateFathomNotes(id: string | number, summary: string) {
+    const res = await fetch(`/api/fathom/meetings/${id}/notes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ summary }),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ message: "Unknown error" }));
+      throw new Error(error.message || "Failed to update meeting notes");
+    }
+    return await res.json();
   }
 };

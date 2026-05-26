@@ -150,9 +150,9 @@ export function ConnectionsView() {
                     const isPM = uRole === "pm" || uRole === "projectmanager";
                     const isAdmin = uRole === "admin" || uRole === "superadmin" || uRole === "pmm";
                     
-                    const isAuthorisedToLink = isOwner || (isAdmin && isPM); // Admins can link PMs if they want? Or just PMs link themselves.
+                    const isAuthorisedToLink = (isOwner || (isAdmin && isPM)) && uRole !== "quality"; // Admins can link PMs if they want? Or just PMs link themselves.
                     // Actually, let's just make it simple: if you are the user or if you are an admin.
-                    const canLink = isOwner || isAdmin;
+                    const canLink = (isOwner || isAdmin) && uRole !== "quality";
 
                     const handleRevoke = async () => {
                       if (!confirm("Are you sure you want to revoke this connection?")) return;

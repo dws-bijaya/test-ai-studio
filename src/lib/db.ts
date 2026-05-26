@@ -332,6 +332,31 @@ export async function initSchema() {
       });
       console.log("Cron logs table created");
     }
+
+    const hasFathomMeetings = await db.schema.hasTable("fathom_meetings");
+    if (!hasFathomMeetings) {
+      await db.schema.createTable("fathom_meetings", (table) => {
+        table.increments("id").primary();
+        table.string("fathom_id", 255).unique();
+        table.string("title", 255);
+        table.string("started_at", 100);
+        table.integer("duration").unsigned();
+        table.text("recording_url");
+        table.text("summary", "longtext");
+        table.text("transcript", "longtext");
+        table.string("people", 500);
+        table.integer("project_id").unsigned();
+        table.timestamps(true, true);
+      });
+      console.log("fathom_meetings table created");
+    } else {
+      const columns = await db("fathom_meetings").columnInfo();
+      await db.schema.alterTable("fathom_meetings", (table) => {
+        if (!columns.project_id) {
+          table.integer("project_id").unsigned();
+        }
+      });
+    }
     
     console.log("MySQL Database schema ensured");
   } catch (error) {
