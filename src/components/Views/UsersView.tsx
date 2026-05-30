@@ -147,7 +147,7 @@ export function UsersView() {
                       <Edit2 className="w-4 h-4" />
                     </button>
                   )}
-                  {isSuperAdmin && currentUser?.role !== "Quality" && String(user.id) !== String(currentUser?.id) && (
+                  {isSuperAdmin && currentUser?.role !== "Quality" && String(user.id) !== String(currentUser?.id) && user.role !== "PMB" && (
                     <button 
                       onClick={() => handleDelete(user.id)}
                       className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg"

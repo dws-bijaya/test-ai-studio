@@ -229,10 +229,12 @@ async function startServer() {
     
     // Split by common reply markers and take the first part
     const splitters = [
+      /\r?\n\s*On\s+[A-Za-z]+,\s+\d{1,2}\s+[A-Za-z]+(?:\s+\d{4})?\s+at\s+\d{1,2}:\d{2}\s*[A-Za-z \s]*,?/i,
       /\r?\n\s*On\s+[\s\S]{1,250}wrote:/i,
       /\r?\n\s*On\s+.*\s+at\s+.*\s+wrote:/i,
       /\r?\n\s*On\s+.*\s+.*\s+<.*>\s+wrote:/i,
       /On\s+.*\s+.*\s+<.*>\s+wrote:/i,
+      /\bOn\s+[A-Za-z]+,\s+\d{1,2}\s+[A-Za-z]+(?:\s+\d{4})?\s+at\s+\d{1,2}:\d{2}/i,
       /-----Original Message-----/i,
       /________________________________/,
       /\r?\nFrom:\s+.*\r?\nSent:\s+.*\r?\nTo:\s+.*/i,
@@ -328,161 +330,291 @@ async function startServer() {
         return;
       }
 
-      await logCron(`Project Bot Sync: Fetching sent items after ${dateYMD}...`, "info");
+      await logCron(`Project Bot Sync: scanning messages after ${dateYMD}...`, "info");
 
       // Setup oauth helper
       const oauthHelper = new google.auth.OAuth2(G_CLIENT_ID, G_CLIENT_SECRET, G_REDIRECT_URI);
       oauthHelper.setCredentials({ refresh_token: conn.refresh_token });
       const gmail = google.gmail({ version: "v1", auth: oauthHelper });
 
-      // Search Gmail sent items
-      const queryStr = `from:projects@wytlabs.com after:${dateYMD}`;
-      const response = await gmail.users.messages.list({ userId: "me", q: queryStr });
-      const messages = response.data.messages || [];
+      const botEmailAddress = userRec?.email || "projects@wytlabs.com";
 
-      await logCron(`Project Bot Sync: Found ${messages.length} candidates in Sent after ${dateYMD}.`, "info");
+      // 1. Fetch Sentbox items (Sent by the bot)
+      const querySent = `from:me after:${dateYMD}`;
+      const responseSent = await gmail.users.messages.list({ userId: "me", q: querySent });
+      const sentMessages = (responseSent.data.messages || []).slice(0, 30);
+      await logCron(`Project Bot Scan: Found ${responseSent.data.messages?.length || 0} candidates in Sentbox. Scanning top ${sentMessages.length} to prevent rate-limiting...`, "info");
 
-      // Get all active/non-closed projects with PM & PMM email info to evaluate criteria
+      // 2. Fetch Inbox items (Received in the bot's inbox)
+      const queryInbox = `to:me after:${dateYMD}`;
+      const responseInbox = await gmail.users.messages.list({ userId: "me", q: queryInbox });
+      const inboxMessages = (responseInbox.data.messages || []).slice(0, 30);
+      await logCron(`Project Bot Scan: Found ${responseInbox.data.messages?.length || 0} candidates in Inbox. Scanning top ${inboxMessages.length} to prevent rate-limiting...`, "info");
+
+      // Get metadata needed for matching and storing
       const projects = await db("projects").whereNot("status", "closed");
-      const users = await db("users").select("id", "email");
+      const users = await db("users").select("id", "email", "role");
       const clients = await db("clients");
 
-      let storedCount = 0;
+      let storedSentCount = 0;
+      let storedInboxCount = 0;
 
-      for (const msg of messages) {
-        // Fetch message details
-        const fullMsg = await gmail.users.messages.get({ userId: "me", id: msg.id! });
-        const payload = fullMsg.data.payload;
-
-        const findBody = (part: any): string => {
-          if (part.body?.data) return Buffer.from(part.body.data, "base64").toString();
-          if (part.parts) {
-            for (const p of part.parts) {
-              const found = findBody(p);
-              if (found) return found;
-            }
+      // Helper function to extract email parts recursively
+      const findBody = (part: any): string => {
+        if (part.body?.data) return Buffer.from(part.body.data, "base64").toString();
+        if (part.parts) {
+          for (const p of part.parts) {
+            const found = findBody(p);
+            if (found) return found;
           }
-          return "";
-        };
-
-        const rawBody = findBody(payload!);
-        const bodyContent = payload?.mimeType === "text/html" ? convert(rawBody) : rawBody;
-        const cleanedBodyContent = cleanEmailBody(bodyContent || "");
-
-        // Headers
-        const headers = payload?.headers;
-        const subject = headers?.find(h => h.name === "Subject")?.value || "No Subject";
-        const senderRaw = headers?.find(h => h.name === "From")?.value || "";
-        const receiverRaw = headers?.find(h => h.name === "To")?.value || "";
-        const ccRaw = headers?.find(h => h.name === "Cc")?.value || "";
-
-        const emailDate = new Date(parseInt(fullMsg.data.internalDate!));
-
-        // Sender validation: must be from projects@wytlabs.com
-        const senders = extractEmails(senderRaw);
-        if (!senders.some(s => s.toLowerCase() === "projects@wytlabs.com")) {
-          continue; // Guard to only process standard bot sender emails if somehow list returned others
         }
+        return "";
+      };
 
-        // Recipients TO and CC
-        const recipients = [
-          ...extractEmails(receiverRaw),
-          ...extractEmails(ccRaw)
-        ].map(r => r.toLowerCase().trim());
+      // --- PROCESS SENT MESSAGES ---
+      for (const msg of sentMessages) {
+        await new Promise(resolve => setTimeout(resolve, 200)); // Rate limiting guard
 
-        // For each project, evaluate conditions:
-        for (const project of projects) {
-          // Check if already stored for this exact project from PROJECTSBOT source
-          const existing = await db("inbox").where({
-            message_id: msg.id,
-            project_id: project.id,
-            source_role: "PROJETSBOT"
-          }).first();
+        try {
+          const fullMsg = await gmail.users.messages.get({ userId: "me", id: msg.id! });
+          const payload = fullMsg.data.payload;
+          const rawBody = findBody(payload!);
+          const bodyContent = payload?.mimeType === "text/html" ? convert(rawBody) : rawBody;
+          const cleanedBodyContent = cleanEmailBody(bodyContent || "");
 
-          if (existing) continue;
+          const headers = payload?.headers;
+          const subject = headers?.find(h => h.name === "Subject")?.value || "No Subject";
+          const senderRaw = headers?.find(h => h.name === "From")?.value || "";
+          const receiverRaw = headers?.find(h => h.name === "To")?.value || "";
+          const ccRaw = headers?.find(h => h.name === "Cc")?.value || "";
+          const emailDate = new Date(parseInt(fullMsg.data.internalDate!));
 
-          // Condition 1: TO/CC contains Project's PM email id and/OR Project PMM
-          const pmUser = users.find(u => Number(u.id) === Number(project.pmId || project.pm_id));
-          const pmmUser = users.find(u => Number(u.id) === Number(project.pmm_id));
-
-          const pmEmail = pmUser?.email?.toLowerCase().trim() || "";
-          const pmmEmail = pmmUser?.email?.toLowerCase().trim() || "";
-
-          const hasPmRecip = pmEmail && recipients.includes(pmEmail);
-          const hasPmmRecip = pmmEmail && recipients.includes(pmmEmail);
-
-          if (!hasPmRecip && !hasPmmRecip) {
-            continue; // Doesn't match PM/PMM recipient criteria for this project
-          }
-
-          // Condition 2: Message body contains client track email id or track domain
-          const clientRec = clients.find(c => Number(c.id) === Number(project.clientId || project.client_id));
-          if (!clientRec) continue;
-
-          let emailIdentifiers: string[] = [];
-          try {
-            emailIdentifiers = typeof clientRec.emailIdentifiers === "string" 
-              ? JSON.parse(clientRec.emailIdentifiers) 
-              : (clientRec.emailIdentifiers || []);
-          } catch (e) {
+          // Ensure it came from the bot
+          const senders = extractEmails(senderRaw);
+          if (!senders.some(s => s.toLowerCase() === "projects@wytlabs.com" || s.toLowerCase() === "projects@whytlabs.com" || s.toLowerCase() === botEmailAddress.toLowerCase())) {
             continue;
           }
 
-          const hasMatchedIdentifier = emailIdentifiers.some(ident => {
-            const cleanIdent = ident.trim().toLowerCase();
-            return cleanIdent && cleanedBodyContent.toLowerCase().includes(cleanIdent);
-          });
+          const recipients = [
+            ...extractEmails(receiverRaw),
+            ...extractEmails(ccRaw)
+          ].map(r => r.toLowerCase().trim());
 
-          if (!hasMatchedIdentifier) {
-            continue; // Doesn't match body content client track identifiers
-          }
+          for (const project of projects) {
+            // Check if already stored for this exact project from PROJECTSBOT source
+            const existing = await db("inbox").where({
+              message_id: msg.id,
+              project_id: project.id,
+              source_role: "PROJETSBOT"
+            }).first();
 
-          // We insert into database!
-          let hasAttachments = false;
-          const attachments: any[] = [];
-          const collectAttachments = (parts: any[]) => {
-            for (const p of parts) {
-              if (p.filename && p.filename.length > 0) {
-                hasAttachments = true;
-                attachments.push({
-                  filename: p.filename,
-                  mimeType: p.mimeType,
-                  size: p.body?.size || 0,
-                  attachmentId: p.body?.attachmentId
-                });
-              }
-              if (p.parts) collectAttachments(p.parts);
+            if (existing) continue;
+
+            const pmUser = users.find(u => Number(u.id) === Number(project.pmId || project.pm_id));
+            const pmmUser = users.find(u => Number(u.id) === Number(project.pmm_id));
+
+            const pmEmail = pmUser?.email?.toLowerCase().trim() || "";
+            const pmmEmail = pmmUser?.email?.toLowerCase().trim() || "";
+
+            const hasPmRecip = pmEmail && recipients.includes(pmEmail);
+            const hasPmmRecip = pmmEmail && recipients.includes(pmmEmail);
+
+            if (!hasPmRecip && !hasPmmRecip) {
+              continue;
             }
-          };
-          if (payload?.parts) collectAttachments(payload.parts);
 
-          await db("inbox").insert({
-            message_id: msg.id,
-            email_date: emailDate,
-            subject,
-            pm_id: project.pmId || project.pm_id,
-            client_id: project.clientId || project.client_id,
-            project_id: project.id,
-            from_address: "projects@wytlabs.com",
-            to_address: extractEmails(receiverRaw).join(", "),
-            type: "SENT",
-            source_role: "PROJETSBOT",
-            body: cleanedBodyContent,
-            has_attachments: hasAttachments,
-            attachments_json: JSON.stringify(attachments)
-          });
+            const clientRec = clients.find(c => Number(c.id) === Number(project.clientId || project.client_id));
+            if (!clientRec) continue;
 
-          storedCount++;
+            let emailIdentifiers: string[] = [];
+            try {
+              emailIdentifiers = typeof clientRec.emailIdentifiers === "string" 
+                ? JSON.parse(clientRec.emailIdentifiers) 
+                : (clientRec.emailIdentifiers || []);
+            } catch (e) {
+              continue;
+            }
+
+            const hasMatchedIdentifier = emailIdentifiers.some(ident => {
+              const cleanIdent = ident.trim().toLowerCase();
+              return cleanIdent && cleanedBodyContent.toLowerCase().includes(cleanIdent);
+            });
+
+            if (!hasMatchedIdentifier) {
+              continue;
+            }
+
+            let hasAttachments = false;
+            const attachments: any[] = [];
+            const collectAttachments = (parts: any[]) => {
+              for (const p of parts) {
+                if (p.filename && p.filename.length > 0) {
+                  hasAttachments = true;
+                  attachments.push({
+                    filename: p.filename,
+                    mimeType: p.mimeType,
+                    size: p.body?.size || 0,
+                    attachmentId: p.body?.attachmentId
+                  });
+                }
+                if (p.parts) collectAttachments(p.parts);
+              }
+            };
+            if (payload?.parts) collectAttachments(payload.parts);
+
+            await db("inbox").insert({
+              message_id: msg.id,
+              email_date: emailDate,
+              subject,
+              pm_id: project.pmId || project.pm_id,
+              client_id: project.clientId || project.client_id,
+              project_id: project.id,
+              from_address: botEmailAddress,
+              to_address: extractEmails(receiverRaw).join(", "),
+              type: "SENT",
+              source_role: "PROJETSBOT",
+              body: cleanedBodyContent,
+              has_attachments: hasAttachments,
+              attachments_json: JSON.stringify(attachments)
+            });
+
+            storedSentCount++;
+          }
+        } catch (sentErr: any) {
+          await logCron(`Error scanning individual sent email ${msg.id}: ${sentErr.message}`, "warn");
         }
       }
 
-      if (storedCount > 0) {
-        await logCron(`Project Bot Sync completed: Saved ${storedCount} match items under tag SENT & parent source PROJETSBOT`, "success");
+      // --- PROCESS INBOX MESSAGES ---
+      for (const msg of inboxMessages) {
+        await new Promise(resolve => setTimeout(resolve, 200)); // Rate limiting guard
+
+        try {
+          const fullMsg = await gmail.users.messages.get({ userId: "me", id: msg.id! });
+          const payload = fullMsg.data.payload;
+          const rawBody = findBody(payload!);
+          const bodyContent = payload?.mimeType === "text/html" ? convert(rawBody) : rawBody;
+          const cleanedBodyContent = cleanEmailBody(bodyContent || "");
+
+          const headers = payload?.headers;
+          const subject = headers?.find(h => h.name === "Subject")?.value || "No Subject";
+          const senderRaw = headers?.find(h => h.name === "From")?.value || "";
+          const receiverRaw = headers?.find(h => h.name === "To")?.value || "";
+          const ccRaw = headers?.find(h => h.name === "Cc")?.value || "";
+          const emailDate = new Date(parseInt(fullMsg.data.internalDate!));
+
+          const recipients = [
+            ...extractEmails(receiverRaw),
+            ...extractEmails(ccRaw)
+          ].map(r => r.toLowerCase().trim());
+
+          // Verify the connector (PM or PMM, not Project Bot) exists in To/Cc:
+          const pmPmmUsers = users.filter(u => {
+            const rUpper = (u.role || "").toUpperCase();
+            return rUpper === "PM" || rUpper === "PMM" || rUpper === "PROJECTMANAGER";
+          });
+          const pmPmmEmails = pmPmmUsers.map(u => u.email.toLowerCase().trim());
+          const hasConnectorInToCc = pmPmmEmails.some(email => recipients.includes(email));
+
+          if (!hasConnectorInToCc) {
+            continue; // Skip because connector is not in To/Cc list
+          }
+
+          // Evaluate bodies for any client identifiers to dynamic link project_id:
+          for (const project of projects) {
+            const existing = await db("inbox").where({
+              message_id: msg.id,
+              project_id: project.id,
+              source_role: "PROJECTBOT",
+              type: "INBOX"
+            }).first();
+
+            if (existing) continue;
+
+            const clientRec = clients.find(c => Number(c.id) === Number(project.clientId || project.client_id));
+            if (!clientRec) continue;
+
+            let emailIdentifiers: string[] = [];
+            try {
+              emailIdentifiers = typeof clientRec.emailIdentifiers === "string"
+                ? JSON.parse(clientRec.emailIdentifiers)
+                : (clientRec.emailIdentifiers || []);
+            } catch (e) {
+              continue;
+            }
+
+            const hasMatchedIdentifier = emailIdentifiers.some(ident => {
+              const cleanIdent = ident.trim().toLowerCase();
+              return cleanIdent && cleanedBodyContent.toLowerCase().includes(cleanIdent);
+            });
+
+            if (!hasMatchedIdentifier) {
+              continue;
+            }
+
+            let hasAttachments = false;
+            const attachments: any[] = [];
+            const collectAttachments = (parts: any[]) => {
+              for (const p of parts) {
+                if (p.filename && p.filename.length > 0) {
+                  hasAttachments = true;
+                  attachments.push({
+                    filename: p.filename,
+                    mimeType: p.mimeType,
+                    size: p.body?.size || 0,
+                    attachmentId: p.body?.attachmentId
+                  });
+                }
+                if (p.parts) collectAttachments(p.parts);
+              }
+            };
+            if (payload?.parts) collectAttachments(payload.parts);
+
+            await db("inbox").insert({
+              message_id: msg.id,
+              email_date: emailDate,
+              subject,
+              pm_id: project.pmId || project.pm_id,
+              client_id: project.clientId || project.client_id,
+              project_id: project.id,
+              from_address: extractEmails(senderRaw)[0] || senderRaw,
+              to_address: extractEmails(receiverRaw).join(", "),
+              type: "INBOX",
+              source_role: "PROJECTBOT",
+              body: cleanedBodyContent,
+              has_attachments: hasAttachments,
+              attachments_json: JSON.stringify(attachments)
+            });
+
+            storedInboxCount++;
+          }
+        } catch (inboxErr: any) {
+          await logCron(`Error scanning individual inbox email ${msg.id}: ${inboxErr.message}`, "warn");
+        }
+      }
+
+      if (storedSentCount > 0 || storedInboxCount > 0) {
+        await logCron(`Project Bot Sync completed: Saved ${storedSentCount} SENT & ${storedInboxCount} INBOX matching items under PROJECTBOT/PROJETSBOT tags`, "success");
       } else {
         await logCron("Project Bot Sync completed: No matching items found to link.", "info");
       }
     } catch (err: any) {
-      await logCron(`Project Bot Sync Error: ${err.message}`, "error");
+      const errMsg = (err.message || "").toLowerCase();
+      const responseData = err.response?.data;
+      const errStr = responseData ? JSON.stringify(responseData).toLowerCase() : "";
+      
+      const isRateLimit = errMsg.includes("rate limit") || 
+                          errMsg.includes("ratelimit") || 
+                          errMsg.includes("429") || 
+                          errStr.includes("rate limit") || 
+                          errStr.includes("ratelimit") || 
+                          errStr.includes("429");
+
+      if (isRateLimit) {
+        await logCron(`Project Bot Sync temporarily rate limited by Provider API: ${err.message}. Skipping scan for this cycle.`, "warn");
+      } else {
+        await logCron(`Project Bot Sync Error: ${err.message}`, "error");
+      }
     }
   }
 
@@ -563,7 +695,8 @@ async function startServer() {
                 for (const query of queries) {
                   const response = await gmail.users.messages.list({ userId: "me", q: query.q });
                   let newGmailCount = 0;
-                  for (const msg of response.data.messages || []) {
+                  const msgsToScan = (response.data.messages || []).slice(0, 20);
+                  for (const msg of msgsToScan) {
                     // Check if this specific email is already recorded for this project AND source role
                     const existing = await db("inbox").where({ 
                       message_id: msg.id, 
@@ -572,6 +705,9 @@ async function startServer() {
                     }).first();
                     
                     if (existing) continue;
+
+                    // Sleep 200ms to stay within limit
+                    await new Promise(resolve => setTimeout(resolve, 200));
 
                     const fullMsg = await gmail.users.messages.get({ userId: "me", id: msg.id! });
                     const payload = fullMsg.data.payload;
@@ -765,11 +901,22 @@ async function startServer() {
             }
           }
         } catch (connErr: any) {
-          await logCron(`Error scanning connection ${conn.id}: ${connErr.message}`, "error");
-          
           const errMsg = (connErr.message || "").toLowerCase();
           const responseData = connErr.response?.data;
           const errStr = responseData ? JSON.stringify(responseData).toLowerCase() : "";
+          
+          const isRateLimit = errMsg.includes("rate limit") || 
+                              errMsg.includes("ratelimit") || 
+                              errMsg.includes("429") || 
+                              errStr.includes("rate limit") || 
+                              errStr.includes("ratelimit") || 
+                              errStr.includes("429");
+
+          if (isRateLimit) {
+            await logCron(`Connection ${conn.id} is temporarily rate limited by Provider API: ${connErr.message}. Skipping scan for this cycle.`, "warn");
+          } else {
+            await logCron(`Error scanning connection ${conn.id}: ${connErr.message}`, "error");
+          }
           
           const isAuthError = errMsg.includes("invalid_grant") || 
                               errMsg.includes("invalid refresh_token") || 
@@ -789,7 +936,8 @@ async function startServer() {
       }
       await logCron("Email scan sequence completed.", "success");
       
-      // Auto-triggered scheduled Fathom meetings sync
+      // Auto-triggered scheduled Fathom meetings sync is disabled for now
+      /*
       try {
         await logCron("Starting scheduled Fathom meetings sync...", "info");
         const fathomRes = await syncFathomMeetings();
@@ -797,6 +945,7 @@ async function startServer() {
       } catch (fError: any) {
         await logCron("Scheduled Fathom sync alignment verified and updated.", "success");
       }
+      */
     } catch (err: any) {
       await logCron(`Global scan error: ${err.message}`, "error");
     }
@@ -1204,6 +1353,13 @@ async function startServer() {
       return res.status(403).json({ message: "Only SuperAdmin can delete users" });
     }
     try {
+      const targetUser = await db("users").where({ id }).first();
+      if (!targetUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      if (targetUser.role === "PMB" || targetUser.email === "projects@wytlabs.com") {
+        return res.status(400).json({ message: "Project Bot is a system-only account and cannot be deleted." });
+      }
       // Delete relative records first to avoid FK constraints
       await db("connections").where({ user_id: id }).delete();
       await db("users").where({ id }).delete();

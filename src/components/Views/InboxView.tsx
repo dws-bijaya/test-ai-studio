@@ -267,7 +267,7 @@ export function InboxView() {
                           <div className={cn(
                             "px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider",
                             email.source_role === "PMM" ? "bg-purple-100 text-purple-600" :
-                            (email.source_role === "PROJECTSBOT" || email.source_role === "PROJETSBOT") ? "bg-indigo-100 text-indigo-600 border border-indigo-200" :
+                            (email.source_role === "PROJECTSBOT" || email.source_role === "PROJETSBOT" || email.source_role === "PROJECTBOT") ? "bg-indigo-100 text-indigo-600 border border-indigo-200" :
                             "bg-amber-100 text-amber-600"
                           )}>
                             Source: {email.source_role}
@@ -349,7 +349,7 @@ export function InboxView() {
                             <span className={cn(
                               "px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider",
                               selectedEmail.source_role === "PMM" ? "bg-purple-100 text-purple-600" :
-                              (selectedEmail.source_role === "PROJECTSBOT" || selectedEmail.source_role === "PROJETSBOT") ? "bg-indigo-100 text-indigo-600 border border-indigo-200" :
+                              (selectedEmail.source_role === "PROJECTSBOT" || selectedEmail.source_role === "PROJETSBOT" || selectedEmail.source_role === "PROJECTBOT") ? "bg-indigo-100 text-indigo-600 border border-indigo-200" :
                               "bg-amber-100 text-amber-600"
                             )}>
                               {selectedEmail.source_role}
