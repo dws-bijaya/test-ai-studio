@@ -310,9 +310,11 @@ async function startServer() {
         }
       }
 
-      if (!minStartDate) {
-        await logCron("Project Bot Sync: No projects with start dates found.", "info");
-        return;
+      // Enforce the minimum/floor sync date of 2026-05-01
+      const floorDate = "2026-05-01";
+      const floorTime = new Date(floorDate).getTime();
+      if (!minStartDate || new Date(minStartDate).getTime() < floorTime) {
+        minStartDate = floorDate;
       }
 
       // Convert minStartDate to Gmail YMD format
