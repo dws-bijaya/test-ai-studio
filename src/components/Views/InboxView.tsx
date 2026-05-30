@@ -41,6 +41,12 @@ export function InboxView() {
   const [showFilters, setShowFilters] = useState(false);
 
   const [syncing, setSyncing] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 20;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, pmFilter, clientFilter, startDate, endDate]);
   
   const triggerSync = async () => {
     setSyncing(true);
@@ -113,6 +119,12 @@ export function InboxView() {
 
     return matchesSearch && matchesPM && matchesClient && matchesStartDate && matchesEndDate;
   });
+
+  const totalPages = Math.ceil(filteredEmails.length / itemsPerPage);
+  const paginatedEmails = filteredEmails.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
 
   return (
     <div className="h-full flex flex-col gap-6">
@@ -253,7 +265,7 @@ export function InboxView() {
               </div>
             ) : (
               <div className="divide-y divide-slate-100">
-                {filteredEmails.map((email) => (
+                {paginatedEmails.map((email) => (
                   <div
                     key={email.id}
                     onClick={() => setSelectedEmail(email)}
@@ -328,6 +340,34 @@ export function InboxView() {
               </div>
             )}
           </div>
+
+          {/* Pagination Footer */}
+          {totalPages > 1 && (
+            <div className="px-4 py-3 border-t border-slate-100 bg-slate-50/70 flex items-center justify-between text-xs shrink-0 select-none">
+              <span className="text-slate-500 font-semibold">
+                Showing <strong className="text-slate-700">{(currentPage - 1) * itemsPerPage + 1}-{Math.min(currentPage * itemsPerPage, filteredEmails.length)}</strong> of <strong className="text-slate-700">{filteredEmails.length}</strong> emails
+              </span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                  disabled={currentPage === 1}
+                  className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:pointer-events-none transition-all shadow-sm"
+                >
+                  Prev
+                </button>
+                <span className="px-2 font-bold text-slate-600">
+                  Page {currentPage} of {totalPages}
+                </span>
+                <button
+                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                  disabled={currentPage === totalPages}
+                  className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:pointer-events-none transition-all shadow-sm"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Email Reading Pan */}

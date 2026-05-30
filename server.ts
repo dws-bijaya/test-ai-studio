@@ -401,12 +401,11 @@ async function startServer() {
           ].map(r => r.toLowerCase().trim());
 
           for (const project of projects) {
-            // Check if already stored for this exact project from PROJECTSBOT source
+            // Check if already stored for this exact project from PROJECTBOT source
             const existing = await db("inbox").where({
               message_id: msg.id,
-              project_id: project.id,
-              source_role: "PROJETSBOT"
-            }).first();
+              project_id: project.id
+            }).whereIn("source_role", ["PROJECTBOT", "PROJETSBOT", "PROJECTSBOT"]).first();
 
             if (existing) continue;
 
@@ -437,7 +436,24 @@ async function startServer() {
 
             const hasMatchedIdentifier = emailIdentifiers.some(ident => {
               const cleanIdent = ident.trim().toLowerCase();
-              return cleanIdent && cleanedBodyContent.toLowerCase().includes(cleanIdent);
+              if (!cleanIdent) return false;
+
+              const cleanIdentNoAt = cleanIdent.startsWith("@") ? cleanIdent.substring(1) : cleanIdent;
+
+              // Check in body Content
+              if (cleanedBodyContent.toLowerCase().includes(cleanIdentNoAt)) return true;
+
+              // Check in subject
+              if (subject.toLowerCase().includes(cleanIdentNoAt)) return true;
+
+              // Check in Sender From
+              if (senderRaw.toLowerCase().includes(cleanIdentNoAt)) return true;
+
+              // Check in Recipients (To, Cc)
+              if (receiverRaw.toLowerCase().includes(cleanIdentNoAt)) return true;
+              if (ccRaw.toLowerCase().includes(cleanIdentNoAt)) return true;
+
+              return false;
             });
 
             if (!hasMatchedIdentifier) {
@@ -472,7 +488,7 @@ async function startServer() {
               from_address: botEmailAddress,
               to_address: extractEmails(receiverRaw).join(", "),
               type: "SENT",
-              source_role: "PROJETSBOT",
+              source_role: "PROJECTBOT",
               body: cleanedBodyContent,
               has_attachments: hasAttachments,
               attachments_json: JSON.stringify(attachments)
@@ -508,26 +524,16 @@ async function startServer() {
             ...extractEmails(ccRaw)
           ].map(r => r.toLowerCase().trim());
 
-          // Verify the connector (PM or PMM, not Project Bot) exists in To/Cc:
-          const pmPmmUsers = users.filter(u => {
-            const rUpper = (u.role || "").toUpperCase();
-            return rUpper === "PM" || rUpper === "PMM" || rUpper === "PROJECTMANAGER";
-          });
-          const pmPmmEmails = pmPmmUsers.map(u => u.email.toLowerCase().trim());
-          const hasConnectorInToCc = pmPmmEmails.some(email => recipients.includes(email));
-
-          if (!hasConnectorInToCc) {
-            continue; // Skip because connector is not in To/Cc list
-          }
+          // For Project Bot syncing its own inbox, we do NOT require a human PM/PMM connector to be in To/Cc list.
+          // This allows clients to email projects@wytlabs.com directly as the Project Bot central inbox.
 
           // Evaluate bodies for any client identifiers to dynamic link project_id:
           for (const project of projects) {
             const existing = await db("inbox").where({
               message_id: msg.id,
               project_id: project.id,
-              source_role: "PROJECTBOT",
               type: "INBOX"
-            }).first();
+            }).whereIn("source_role", ["PROJECTBOT", "PROJETSBOT", "PROJECTSBOT"]).first();
 
             if (existing) continue;
 
@@ -545,7 +551,24 @@ async function startServer() {
 
             const hasMatchedIdentifier = emailIdentifiers.some(ident => {
               const cleanIdent = ident.trim().toLowerCase();
-              return cleanIdent && cleanedBodyContent.toLowerCase().includes(cleanIdent);
+              if (!cleanIdent) return false;
+
+              const cleanIdentNoAt = cleanIdent.startsWith("@") ? cleanIdent.substring(1) : cleanIdent;
+
+              // Check in body Content
+              if (cleanedBodyContent.toLowerCase().includes(cleanIdentNoAt)) return true;
+
+              // Check in subject
+              if (subject.toLowerCase().includes(cleanIdentNoAt)) return true;
+
+              // Check in Sender From
+              if (senderRaw.toLowerCase().includes(cleanIdentNoAt)) return true;
+
+              // Check in Recipients (To, Cc)
+              if (receiverRaw.toLowerCase().includes(cleanIdentNoAt)) return true;
+              if (ccRaw.toLowerCase().includes(cleanIdentNoAt)) return true;
+
+              return false;
             });
 
             if (!hasMatchedIdentifier) {
