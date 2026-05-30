@@ -1,5 +1,18 @@
 import { Client, Project, EmailLog } from "../types";
 
+const activeRequests = new Map<string, Promise<any>>();
+
+function cacheRequest<T>(key: string, fetchFn: () => Promise<T>): Promise<T> {
+  if (activeRequests.has(key)) {
+    return activeRequests.get(key)!;
+  }
+  const promise = fetchFn().finally(() => {
+    activeRequests.delete(key);
+  });
+  activeRequests.set(key, promise);
+  return promise;
+}
+
 export const dataService = {
   // Clients
   async createClient(client: Omit<Client, "id">) {
@@ -15,13 +28,15 @@ export const dataService = {
     return await res.json();
   },
   async getClients() {
-    try {
-      const res = await fetch("/api/clients");
-      if (!res.ok) return [];
-      return await res.json();
-    } catch (e) {
-      return [];
-    }
+    return cacheRequest("getClients", async () => {
+      try {
+        const res = await fetch("/api/clients");
+        if (!res.ok) return [];
+        return await res.json();
+      } catch (e) {
+        return [];
+      }
+    });
   },
   async deleteClient(id: string | number) {
     const res = await fetch(`/api/clients/${id}`, { method: "DELETE" });
@@ -86,35 +101,43 @@ export const dataService = {
     return await res.json();
   },
   async getProjects() {
-    try {
-      const res = await fetch("/api/projects");
-      if (!res.ok) return [];
-      return await res.json();
-    } catch (e) {
-      return [];
-    }
+    return cacheRequest("getProjects", async () => {
+      try {
+        const res = await fetch("/api/projects");
+        if (!res.ok) return [];
+        return await res.json();
+      } catch (e) {
+        return [];
+      }
+    });
   },
   async getEligibleClients() {
-    try {
-      const res = await fetch("/api/clients/eligible");
-      if (!res.ok) return [];
-      return await res.json();
-    } catch (e) {
-      return [];
-    }
+    return cacheRequest("getEligibleClients", async () => {
+      try {
+        const res = await fetch("/api/clients/eligible");
+        if (!res.ok) return [];
+        return await res.json();
+      } catch (e) {
+        return [];
+      }
+    });
   },
 
   // Email Logs
   async getEmailLogs(projectId: string) {
-    const res = await fetch(`/api/logs/${projectId}`);
-    return await res.json();
+    return cacheRequest(`getEmailLogs_${projectId}`, async () => {
+      const res = await fetch(`/api/logs/${projectId}`);
+      return await res.json();
+    });
   },
 
   // Users
   async getUsers() {
-    const res = await fetch("/api/users");
-    if (!res.ok) return [];
-    return await res.json();
+    return cacheRequest("getUsers", async () => {
+      const res = await fetch("/api/users");
+      if (!res.ok) return [];
+      return await res.json();
+    });
   },
 
   async createUser(userData: any) {
@@ -156,12 +179,14 @@ export const dataService = {
 
   // Connections
   async getConnections() {
-    const res = await fetch("/api/connections");
-    if (!res.ok) {
-      const error = await res.json().catch(() => ({ message: "Failed to fetch connections" }));
-      throw new Error(error.message || "Failed to fetch connections");
-    }
-    return await res.json();
+    return cacheRequest("getConnections", async () => {
+      const res = await fetch("/api/connections");
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({ message: "Failed to fetch connections" }));
+        throw new Error(error.message || "Failed to fetch connections");
+      }
+      return await res.json();
+    });
   },
 
   async revokeConnection(id: number) {
@@ -194,19 +219,23 @@ export const dataService = {
   },
 
   async getInboxWeeklyReport() {
-    const res = await fetch("/api/inbox/weekly-report");
-    if (!res.ok) throw new Error("Failed to fetch weekly report");
-    return await res.json();
+    return cacheRequest("getInboxWeeklyReport", async () => {
+      const res = await fetch("/api/inbox/weekly-report");
+      if (!res.ok) throw new Error("Failed to fetch weekly report");
+      return await res.json();
+    });
   },
 
   async getInbox() {
-    try {
-      const res = await fetch("/api/inbox");
-      if (!res.ok) return [];
-      return await res.json();
-    } catch (e) {
-      return [];
-    }
+    return cacheRequest("getInbox", async () => {
+      try {
+        const res = await fetch("/api/inbox");
+        if (!res.ok) return [];
+        return await res.json();
+      } catch (e) {
+        return [];
+      }
+    });
   },
 
   async deleteInboxItem(id: string | number) {
@@ -225,9 +254,11 @@ export const dataService = {
 
   // Cron Logs
   async getCronLogs() {
-    const res = await fetch("/api/cron-logs");
-    if (!res.ok) return [];
-    return await res.json();
+    return cacheRequest("getCronLogs", async () => {
+      const res = await fetch("/api/cron-logs");
+      if (!res.ok) return [];
+      return await res.json();
+    });
   },
 
   async clearCronLogs() {
@@ -238,13 +269,15 @@ export const dataService = {
 
   // Business Units
   async getBusinessUnits() {
-    try {
-      const res = await fetch("/api/business-units");
-      if (!res.ok) return [];
-      return await res.json();
-    } catch (e) {
-      return [];
-    }
+    return cacheRequest("getBusinessUnits", async () => {
+      try {
+        const res = await fetch("/api/business-units");
+        if (!res.ok) return [];
+        return await res.json();
+      } catch (e) {
+        return [];
+      }
+    });
   },
 
   async updateBusinessUnit(id: string | number, name: string) {
@@ -262,13 +295,15 @@ export const dataService = {
 
   // Fathom Meetings
   async getFathomMeetings() {
-    try {
-      const res = await fetch("/api/fathom/meetings");
-      if (!res.ok) return [];
-      return await res.json();
-    } catch (e) {
-      return [];
-    }
+    return cacheRequest("getFathomMeetings", async () => {
+      try {
+        const res = await fetch("/api/fathom/meetings");
+        if (!res.ok) return [];
+        return await res.json();
+      } catch (e) {
+        return [];
+      }
+    });
   },
   async syncFathomMeetings() {
     const res = await fetch("/api/fathom/sync", { method: "POST" });

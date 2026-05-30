@@ -263,17 +263,17 @@ export function InboxView() {
                       email.type === "SENT" ? "bg-blue-50/20" : ""
                     )}
                   >
-                    <div className="flex justify-between items-start mb-1">
-                      <div className="flex items-center gap-2">
+                    <div className="flex justify-between items-start mb-1 gap-4">
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
                         <div className={cn(
-                          "px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider",
+                          "px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider shrink-0",
                           email.type === "SENT" ? "bg-blue-100 text-blue-600" : "bg-emerald-100 text-emerald-600"
                         )}>
                           {email.type || "INBOX"}
                         </div>
                         {email.source_role && (
                           <div className={cn(
-                            "px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider",
+                            "px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider shrink-0",
                             email.source_role === "PMM" ? "bg-purple-100 text-purple-600" :
                             (email.source_role === "PROJECTSBOT" || email.source_role === "PROJETSBOT" || email.source_role === "PROJECTBOT") ? "bg-indigo-100 text-indigo-600 border border-indigo-200" :
                             "bg-amber-100 text-amber-600"
@@ -281,14 +281,20 @@ export function InboxView() {
                             Source: {email.source_role}
                           </div>
                         )}
-                        <span className="font-bold text-slate-900 truncate max-w-[280px] sm:max-w-[360px]">
+                        <span 
+                          className="font-black text-slate-900 truncate inline-block max-w-[180px] sm:max-w-[320px] min-w-0"
+                          title={email.type === "SENT" ? `To: ${email.to_address}` : email.from_address}
+                        >
                           {email.type === "SENT" ? `To: ${email.to_address}` : email.from_address}
                         </span>
                         {!!email.has_attachments && (
-                          <Paperclip className="w-3.5 h-3.5 text-slate-300" />
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded text-[9px] font-black uppercase tracking-wider shrink-0" title="Has Attachments">
+                            <Paperclip className="w-3 h-3 text-amber-600" />
+                            Attachment
+                          </span>
                         )}
                       </div>
-                      <span className="text-[10px] font-bold text-slate-400 uppercase">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase shrink-0">
                         {formatDate(email.email_date)}
                       </span>
                     </div>
