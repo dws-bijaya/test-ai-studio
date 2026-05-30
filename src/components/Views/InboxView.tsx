@@ -88,17 +88,25 @@ export function InboxView() {
   };
 
   const filteredEmails = emails.filter(email => {
+    if (!email) return false;
+    const subj = (email.subject || "").toLowerCase();
+    const from = (email.from_address || "").toLowerCase();
+    const clientN = (email.clientName || "").toLowerCase();
+    const projN = (email.projectName || "").toLowerCase();
+    const pmN = (email.pmName || "").toLowerCase();
+    const term = (searchTerm || "").toLowerCase();
+
     const matchesSearch = 
-      email.subject.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      email.from_address.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (email.clientName || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (email.projectName || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (email.pmName || "").toLowerCase().includes(searchTerm.toLowerCase());
+      subj.includes(term) ||
+      from.includes(term) ||
+      clientN.includes(term) ||
+      projN.includes(term) ||
+      pmN.includes(term);
 
     const matchesPM = !pmFilter || (email.pmName || `PM #${email.pm_id}`) === pmFilter;
     const matchesClient = !clientFilter || email.clientName === clientFilter;
     
-    const emailDate = new Date(email.email_date);
+    const emailDate = email.email_date ? new Date(email.email_date) : new Date(0);
     const matchesStartDate = !startDate || emailDate >= new Date(startDate);
     // End date should include the whole day
     const matchesEndDate = !endDate || emailDate <= new Date(new Date(endDate).setHours(23, 59, 59, 999));
@@ -273,10 +281,10 @@ export function InboxView() {
                             Source: {email.source_role}
                           </div>
                         )}
-                        <span className="font-bold text-slate-900 truncate max-w-[150px]">
+                        <span className="font-bold text-slate-900 truncate max-w-[280px] sm:max-w-[360px]">
                           {email.type === "SENT" ? `To: ${email.to_address}` : email.from_address}
                         </span>
-                        {email.has_attachments && (
+                        {!!email.has_attachments && (
                           <Paperclip className="w-3.5 h-3.5 text-slate-300" />
                         )}
                       </div>
@@ -363,7 +371,7 @@ export function InboxView() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  {selectedEmail.has_attachments && (
+                  {!!selectedEmail.has_attachments && (
                     <button 
                       onClick={() => setShowAttachments(true)}
                       className="p-2 text-slate-400 hover:text-primary hover:bg-primary/5 rounded-lg transition-all"

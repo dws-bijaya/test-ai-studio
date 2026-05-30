@@ -2047,15 +2047,31 @@ async function startServer() {
         // PMM can see their PMs' emails
         const managedPmIds = await db("users").where({ manager_id: userId }).select("id");
         const ids = managedPmIds.map(u => u.id);
+        if (ids.length === 0) {
+          return res.json([]);
+        }
         query.whereIn("inbox.pm_id", ids);
       }
       // SuperAdmin and Admin see all (no filter)
 
       const emails = await query;
-      res.json(emails.map(e => ({
-        ...e,
-        attachments: e.attachments_json ? JSON.parse(e.attachments_json) : []
-      })));
+      const formattedEmails = emails.map(e => {
+        let parsedAttachments = [];
+        if (e.attachments_json) {
+          try {
+            parsedAttachments = typeof e.attachments_json === "string" 
+              ? JSON.parse(e.attachments_json) 
+              : (Array.isArray(e.attachments_json) ? e.attachments_json : []);
+          } catch (pe) {
+            console.error(`attachments_json parse error in email id=${e.id}:`, pe);
+          }
+        }
+        return {
+          ...e,
+          attachments: Array.isArray(parsedAttachments) ? parsedAttachments : []
+        };
+      });
+      res.json(formattedEmails);
     } catch (error) {
       console.error("Fetch inbox error:", error);
       res.status(500).json({ message: "Error fetching inbox" });
