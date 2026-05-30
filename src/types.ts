@@ -1,4 +1,4 @@
-export type UserRole = "SuperAdmin" | "Admin" | "PMM" | "PM" | "Quality";
+export type UserRole = "SuperAdmin" | "Admin" | "PMM" | "PM" | "Quality" | "PMB";
 
 export interface UserProfile {
   id: number | string;

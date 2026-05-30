@@ -22,7 +22,7 @@ export function UsersView() {
     managerId: ""
   });
 
-  const roles: UserRole[] = ["SuperAdmin", "Admin", "PMM", "PM", "Quality"];
+  const roles: UserRole[] = ["SuperAdmin", "Admin", "PMM", "PM", "Quality", "PMB"];
   const managers = users.filter(u => u.role === "PMM");
 
   const fetchUsers = async () => {
@@ -182,12 +182,14 @@ export function UsersView() {
                     ? "bg-amber-50 text-amber-600 border border-amber-100"
                     : user.role === "PMM"
                     ? "bg-purple-50 text-purple-600 border border-purple-100"
+                    : user.role === "PMB"
+                    ? "bg-indigo-50 text-indigo-600 border border-indigo-100"
                     : user.role === "Quality"
                     ? "bg-emerald-50 text-emerald-600 border border-emerald-100"
                     : "bg-blue-50 text-blue-600 border border-blue-100"
                 )}>
                   <Shield className="w-3 h-3" />
-                  {user.role}
+                  {user.role === "PMB" ? "Project Bot" : user.role}
                 </div>
                 <div className="flex flex-col items-end">
                   <span className="text-[10px] text-slate-300 font-mono uppercase">ID: {user.id}</span>

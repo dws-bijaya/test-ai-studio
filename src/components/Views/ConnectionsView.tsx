@@ -117,7 +117,7 @@ export function ConnectionsView() {
                     <h3 className="font-bold text-slate-900 capitalize">{conn.provider || "Unlinked"} Connection</h3>
                     <div className="flex items-center gap-2 mt-0.5">
                       <p className="text-sm text-slate-500">User: {conn.userName || conn.userEmail}</p>
-                      <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-mono font-bold uppercase">Role: {conn.userRole || 'PM'}</span>
+                      <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-mono font-bold uppercase">Role: {conn.userRole === 'PMB' ? 'Project Bot' : (conn.userRole || 'PM')}</span>
                     </div>
                   </div>
                 </div>

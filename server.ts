@@ -32,6 +32,7 @@ async function startServer() {
   const adminPassword = "Admin@123!";
   const adminName = "Vaibhav Kakkar";
   try {
+    const columns = await db("users").columnInfo();
     const existing = await db("users").where({ email: adminEmail }).first();
     const hashedPassword = await bcrypt.hash(adminPassword, 10);
     
@@ -41,7 +42,6 @@ async function startServer() {
         password: hashedPassword,
         role: "SuperAdmin"
       };
-      const columns = await db("users").columnInfo();
       if (columns.name) newUser.name = adminName;
       if (columns.displayName) newUser.displayName = adminName;
       if (columns.full_name) newUser.full_name = adminName;
@@ -60,14 +60,37 @@ async function startServer() {
       console.log("Existing Super Admin updated with SuperAdmin role");
     }
     
+    // Auto-seed Project Bot user
+    const botEmail = "projects@wytlabs.com";
+    const botName = "Project Bot";
+    const existingBot = await db("users").where({ email: botEmail }).first();
+    const mockPassword = await bcrypt.hash(crypto.randomBytes(16).toString("hex"), 10);
+    const botUserObj: any = {
+      email: botEmail,
+      password: mockPassword,
+      role: "PMB",
+      manager_id: null
+    };
+    if (columns.displayName) botUserObj.displayName = botName;
+    if (columns.full_name) botUserObj.full_name = botName;
+    if (columns.name) botUserObj.name = botName;
+
+    if (!existingBot) {
+      await db("users").insert(botUserObj);
+      console.log("Project Bot user auto-seeded successfully");
+    } else {
+      await db("users").where({ email: botEmail }).update({ role: "PMB", manager_id: null });
+      console.log("Project Bot user role and manager ensured on start");
+    }
+
     // Log users for verification
     const allUsers = await db("users").select("id", "email", "role");
     console.log("Current users in DB:", JSON.stringify(allUsers, null, 2));
 
-    // Ensure all PMs and PMMs have connection records
+    // Ensure all PMs, PMMs and PMBs have connection records
     for (const u of allUsers) {
       const roleUpper = (u.role || "").toUpperCase();
-      if (roleUpper === "PM" || roleUpper === "PMM") {
+      if (roleUpper === "PM" || roleUpper === "PMM" || roleUpper === "PMB") {
         const conn = await db("connections").where({ user_id: u.id }).first();
         if (!conn) {
           await db("connections").insert({
@@ -258,6 +281,211 @@ async function startServer() {
     return false;
   }
 
+  async function syncProjectBot(conn: any, userRec: any) {
+    await logCron("Starting Project Bot email scan sequence...", "info");
+    try {
+      if (conn.provider !== "gmail") {
+        await logCron("Project Bot only supports Gmail provider currently", "warn");
+        return;
+      }
+
+      // Fetch the earliest (minimum) start date of all projects
+      const allProjectsList = await db("projects");
+      let minStartDate: string | null = null;
+
+      for (const p of allProjectsList) {
+        const d = p.startDate || p.start_date;
+        if (d && typeof d === "string" && d.trim() !== "") {
+          if (!minStartDate) {
+            minStartDate = d;
+          } else {
+            const tCurrent = new Date(d).getTime();
+            const tMin = new Date(minStartDate).getTime();
+            if (!isNaN(tCurrent) && !isNaN(tMin) && tCurrent < tMin) {
+              minStartDate = d;
+            }
+          }
+        }
+      }
+
+      if (!minStartDate) {
+        await logCron("Project Bot Sync: No projects with start dates found.", "info");
+        return;
+      }
+
+      // Convert minStartDate to Gmail YMD format
+      let dateYMD = "";
+      const dObj = new Date(minStartDate);
+      if (!isNaN(dObj.getTime())) {
+        const y = dObj.getFullYear();
+        const m = String(dObj.getMonth() + 1).padStart(2, "0");
+        const d = String(dObj.getDate()).padStart(2, "0");
+        dateYMD = `${y}/${m}/${d}`;
+      }
+
+      if (!dateYMD) {
+        await logCron("Project Bot Sync: Invalid start date resolved across projects.", "info");
+        return;
+      }
+
+      await logCron(`Project Bot Sync: Fetching sent items after ${dateYMD}...`, "info");
+
+      // Setup oauth helper
+      const oauthHelper = new google.auth.OAuth2(G_CLIENT_ID, G_CLIENT_SECRET, G_REDIRECT_URI);
+      oauthHelper.setCredentials({ refresh_token: conn.refresh_token });
+      const gmail = google.gmail({ version: "v1", auth: oauthHelper });
+
+      // Search Gmail sent items
+      const queryStr = `from:projects@wytlabs.com after:${dateYMD}`;
+      const response = await gmail.users.messages.list({ userId: "me", q: queryStr });
+      const messages = response.data.messages || [];
+
+      await logCron(`Project Bot Sync: Found ${messages.length} candidates in Sent after ${dateYMD}.`, "info");
+
+      // Get all active/non-closed projects with PM & PMM email info to evaluate criteria
+      const projects = await db("projects").whereNot("status", "closed");
+      const users = await db("users").select("id", "email");
+      const clients = await db("clients");
+
+      let storedCount = 0;
+
+      for (const msg of messages) {
+        // Fetch message details
+        const fullMsg = await gmail.users.messages.get({ userId: "me", id: msg.id! });
+        const payload = fullMsg.data.payload;
+
+        const findBody = (part: any): string => {
+          if (part.body?.data) return Buffer.from(part.body.data, "base64").toString();
+          if (part.parts) {
+            for (const p of part.parts) {
+              const found = findBody(p);
+              if (found) return found;
+            }
+          }
+          return "";
+        };
+
+        const rawBody = findBody(payload!);
+        const bodyContent = payload?.mimeType === "text/html" ? convert(rawBody) : rawBody;
+        const cleanedBodyContent = cleanEmailBody(bodyContent || "");
+
+        // Headers
+        const headers = payload?.headers;
+        const subject = headers?.find(h => h.name === "Subject")?.value || "No Subject";
+        const senderRaw = headers?.find(h => h.name === "From")?.value || "";
+        const receiverRaw = headers?.find(h => h.name === "To")?.value || "";
+        const ccRaw = headers?.find(h => h.name === "Cc")?.value || "";
+
+        const emailDate = new Date(parseInt(fullMsg.data.internalDate!));
+
+        // Sender validation: must be from projects@wytlabs.com
+        const senders = extractEmails(senderRaw);
+        if (!senders.some(s => s.toLowerCase() === "projects@wytlabs.com")) {
+          continue; // Guard to only process standard bot sender emails if somehow list returned others
+        }
+
+        // Recipients TO and CC
+        const recipients = [
+          ...extractEmails(receiverRaw),
+          ...extractEmails(ccRaw)
+        ].map(r => r.toLowerCase().trim());
+
+        // For each project, evaluate conditions:
+        for (const project of projects) {
+          // Check if already stored for this exact project from PROJECTSBOT source
+          const existing = await db("inbox").where({
+            message_id: msg.id,
+            project_id: project.id,
+            source_role: "PROJETSBOT"
+          }).first();
+
+          if (existing) continue;
+
+          // Condition 1: TO/CC contains Project's PM email id and/OR Project PMM
+          const pmUser = users.find(u => Number(u.id) === Number(project.pmId || project.pm_id));
+          const pmmUser = users.find(u => Number(u.id) === Number(project.pmm_id));
+
+          const pmEmail = pmUser?.email?.toLowerCase().trim() || "";
+          const pmmEmail = pmmUser?.email?.toLowerCase().trim() || "";
+
+          const hasPmRecip = pmEmail && recipients.includes(pmEmail);
+          const hasPmmRecip = pmmEmail && recipients.includes(pmmEmail);
+
+          if (!hasPmRecip && !hasPmmRecip) {
+            continue; // Doesn't match PM/PMM recipient criteria for this project
+          }
+
+          // Condition 2: Message body contains client track email id or track domain
+          const clientRec = clients.find(c => Number(c.id) === Number(project.clientId || project.client_id));
+          if (!clientRec) continue;
+
+          let emailIdentifiers: string[] = [];
+          try {
+            emailIdentifiers = typeof clientRec.emailIdentifiers === "string" 
+              ? JSON.parse(clientRec.emailIdentifiers) 
+              : (clientRec.emailIdentifiers || []);
+          } catch (e) {
+            continue;
+          }
+
+          const hasMatchedIdentifier = emailIdentifiers.some(ident => {
+            const cleanIdent = ident.trim().toLowerCase();
+            return cleanIdent && cleanedBodyContent.toLowerCase().includes(cleanIdent);
+          });
+
+          if (!hasMatchedIdentifier) {
+            continue; // Doesn't match body content client track identifiers
+          }
+
+          // We insert into database!
+          let hasAttachments = false;
+          const attachments: any[] = [];
+          const collectAttachments = (parts: any[]) => {
+            for (const p of parts) {
+              if (p.filename && p.filename.length > 0) {
+                hasAttachments = true;
+                attachments.push({
+                  filename: p.filename,
+                  mimeType: p.mimeType,
+                  size: p.body?.size || 0,
+                  attachmentId: p.body?.attachmentId
+                });
+              }
+              if (p.parts) collectAttachments(p.parts);
+            }
+          };
+          if (payload?.parts) collectAttachments(payload.parts);
+
+          await db("inbox").insert({
+            message_id: msg.id,
+            email_date: emailDate,
+            subject,
+            pm_id: project.pmId || project.pm_id,
+            client_id: project.clientId || project.client_id,
+            project_id: project.id,
+            from_address: "projects@wytlabs.com",
+            to_address: extractEmails(receiverRaw).join(", "),
+            type: "SENT",
+            source_role: "PROJETSBOT",
+            body: cleanedBodyContent,
+            has_attachments: hasAttachments,
+            attachments_json: JSON.stringify(attachments)
+          });
+
+          storedCount++;
+        }
+      }
+
+      if (storedCount > 0) {
+        await logCron(`Project Bot Sync completed: Saved ${storedCount} match items under tag SENT & parent source PROJETSBOT`, "success");
+      } else {
+        await logCron("Project Bot Sync completed: No matching items found to link.", "info");
+      }
+    } catch (err: any) {
+      await logCron(`Project Bot Sync Error: ${err.message}`, "error");
+    }
+  }
+
   async function scanEmails() {
     await logCron("Starting email scan sequence...");
     try {
@@ -275,6 +503,14 @@ async function startServer() {
           if (!userRec) continue;
           
           const roleUpper = (userRec.role || "").toUpperCase();
+          if (roleUpper === "PMB") {
+            try {
+              await syncProjectBot(conn, userRec);
+            } catch (botErr: any) {
+              await logCron(`Error syncing Project Bot: ${botErr.message}`, "error");
+            }
+            continue;
+          }
           const sourceRole = roleUpper === "PMM" ? "PMM" : "PM";
 
           // Find projects associated with this user
@@ -778,6 +1014,10 @@ async function startServer() {
       const user = await db("users").where({ email }).first();
       if (!user) return res.status(404).json({ message: "User not found" });
 
+      if ((user.role || "").toUpperCase() === "PMB") {
+        return res.status(403).json({ message: "Project Bot is a system-only account and cannot log in." });
+      }
+
       const validPassword = await bcrypt.compare(password, user.password);
       if (!validPassword) return res.status(401).json({ message: "Invalid credentials" });
 
@@ -891,7 +1131,7 @@ async function startServer() {
         console.log(`User created with ID: ${userId}, Role: ${role}`);
         
         const roleUpper = (role || "").toUpperCase();
-        if (role && (roleUpper === "PM" || roleUpper === "PMM" || role.toLowerCase() === "pm" || role.toLowerCase() === "pmm")) {
+        if (role && (roleUpper === "PM" || roleUpper === "PMM" || roleUpper === "PMB")) {
           console.log(`Creating connection record for user ${userId} with role ${role}`);
           await trx("connections").insert({
             user_id: userId,
@@ -940,7 +1180,7 @@ async function startServer() {
       // If role became PM or PMM, ensure connection record exists
       const finalUser = await db("users").where({ id }).first();
       const finalRole = (finalUser.role || "").toUpperCase();
-      if (finalRole === "PM" || finalRole === "PMM" || finalRole === "PROJECTMANAGER") {
+      if (finalRole === "PM" || finalRole === "PMM" || finalRole === "PROJECTMANAGER" || finalRole === "PMB") {
         const existingConn = await db("connections").where({ user_id: id }).first();
         if (!existingConn) {
           await db("connections").insert({
